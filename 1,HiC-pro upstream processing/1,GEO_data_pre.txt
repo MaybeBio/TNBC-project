@@ -1,23 +1,27 @@
 #GEO、ENCODE数据库搜索主题、数据类型（以Hi-C数据为主）
-1，整理数据为表格，表格形式见TNBC_vs_HMEC整理表格（见Ali cloud）
+1，整理数据为表格，表格形式见TNBC_vs_HMEC整理表格——【bishe】data收集/修改后（见Ali cloud）
 2，数据下载：
 SRA Run Selector——>Accession List——>筛选所需要的SRR序列号文件txt
 prefetch --option-file 待下载srr.txt
-nohup prefetch --maxsize 50G --option-file SRR.txt >& log文件 &     #指定数据最大下载限制
+nohup prefetch --maxsize 50G --option-file SRR.txt >& log文件 &     #--maxsize指定数据最大下载限制
 #注意prefetch以及常用的fastq-dump都需要到github的SRA Toolkit仓库中下载取用，一般下1个SRA Toolkit就够了
 3,数据解压：
 #建议使用fastqer-dump解压sra数据，比旧fastq-dump更快，也在SRA Toolkit里
-fasterq-dump -e 10 sra文件 #-e是线程，注意reads是单端还是双端
-4，hic-pro软件下载+数据预处理
-(1)hic-pro软件下载见流程记录1.docx（见Ali cloud）
+fasterq-dump -e 10 sra文件  #-e是线程，注意reads是单端还是双端,视数据质控需求添加其他参数
+4，hic-pro软件安装+数据预处理
+(1)hic-pro软件安装细节见【bishe】流程记录1 word（见Ali cloud）
 (2)数据预处理：
-依据hic-pro（https://github.com/nservant/HiC-Pro）软件安装需求准备下列所需3文件：
+依据hic-pro（https://github.com/nservant/HiC-Pro）软件安装需求准备下列所需3文件（细节同上见相关word）：
 ①table（染色体size文件），
 ②含有酶切片段片段信息的bed文件，
 ③bowtie2软件建立的索引
-！！！需要注意的一点是要知道hic数据的限制酶信息，用于上述②操作，一般限制性内切酶信息可通过实验前后得知
-
-
+！！！需要注意的一点是要知道hic数据的限制酶信息，用于上述②操作，一般限制性内切酶信息可通过实验前后得知，此处参考（https://www.jieandze1314.com/post/cnposts/111/）使用python脚本predicted_Hic_restriction_enzyme.py评估内切酶类型，也可参考其他github数据处理方法
+(3)数据分辨率大小的问题，涉及到是否需要合并技术性rep的fq数据：
+①原则上，对于同一批次处理的对照数据，例如TNBC以及HMEC，如果TNBC需要merge fq文件来处理，以便于下游分析TAD或者loop等高精度分辨率结构，那么HMEC也必须同等merge；即所有数据同等情况下，如果要merge fq比较就都merge，如果要分析单技术性rep一条道走到黑就全都只用单rep分析数据，即一致性。
+②要不要merge数据，是下游分析一致性的前提，分析前如果合并了，就不能A模块合并，B模块不合并，即合并与否需要在前提考虑，一旦决定合并或者不合并，后续的数据分析处理就都需要遵守使用一致的数据处理
+③至于要不要merge数据，原则上是数据能用尽用，主要有原因还是查看自己原始fq数据的分辨率深度够不够
+(4)hic-pro中的配置文件config-hicpro.txt等衍生同类文件，设置细节见【bishe】流程记录1 word，具体结果形式可参考上传的config-hicpro.txt（处理TNBC中2类）以及config-hicpro_mb231.txt（处理TNBC中最后一类MB231），主要依据github软件官网修改文件依赖路径+服务器执行参数等，以及注意分辨率参数的设置（bin size本项目设置为10,20,40,100,500kb），建议阅读官网手册以及自己分析3层次等结构数据需求设置对应的分辨率，以及注意自己数据的大小
+(4)数据分辨率大小的设置：
 
 
 
