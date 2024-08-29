@@ -1,0 +1,23 @@
+#GEO、ENCODE数据库搜索主题、数据类型（以Hi-C数据为主）
+1，整理数据为表格，表格形式见TNBC_vs_HMEC整理表格（见Ali cloud）
+2，数据下载：
+SRA Run Selector——>Accession List——>筛选所需要的SRR序列号文件txt
+prefetch --option-file 待下载srr.txt
+nohup prefetch --maxsize 50G --option-file SRR.txt >& log文件 &     #指定数据最大下载限制
+#注意prefetch以及常用的fastq-dump都需要到github的SRA Toolkit仓库中下载取用，一般下1个SRA Toolkit就够了
+3,数据解压：
+#建议使用fastqer-dump解压sra数据，比旧fastq-dump更快，也在SRA Toolkit里
+fasterq-dump -e 10 sra文件 #-e是线程，注意reads是单端还是双端
+4，hic-pro软件下载+数据预处理
+(1)hic-pro软件下载见流程记录1.docx（见Ali cloud）
+(2)数据预处理：
+依据hic-pro（https://github.com/nservant/HiC-Pro）软件安装需求准备下列所需3文件：
+①table（染色体size文件），
+②含有酶切片段片段信息的bed文件，
+③bowtie2软件建立的索引
+！！！需要注意的一点是要知道hic数据的限制酶信息，用于上述②操作，一般限制性内切酶信息可通过实验前后得知
+
+
+
+
+
