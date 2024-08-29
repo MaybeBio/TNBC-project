@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
-# author: Guisen Chen
-# datetime: 2022/09/02
-# email: thecgs001@foxmail.com
+
 
 import re
 import os
