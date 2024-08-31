@@ -1,0 +1,5 @@
+#实际上就是1脚本执行时的shell命令，被echo记录了下来
+bash hicpro_collectStats.sh hicpro /mnt/disk4/haitao/bysj_seu/geo_data/hic/hicpro_output/
+bash hicpro_collectStats.sh hicpro /mnt/disk4/haitao/bysj_seu/geo_data/hic/hicpro_output/
+bash hicpro_collectStats.sh hicpro /mnt/disk4/haitao/bysj_seu/geo_data/hic/hicpro_output/
+bash hicpro_collectStats.sh hicpro /mnt/disk4/haitao/bysj_seu/geo_data/hic/hicpro_output/
