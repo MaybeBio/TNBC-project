@@ -1,0 +1,52 @@
+Sample: BT549
+valid_interaction: 427115856.000000
+valid_interaction_rmdup: 310590379.000000
+trans_interaction: 35223386.000000
+cis_interaction: 275366993.000000
+cis_shortRange: 124604747.000000
+cis_longRange: 150762246.000000
+valid_interaction_rmdup_ratio: 0.727181
+trans_interaction_ratio: 0.113408
+cis_interaction_ratio: 0.886592
+cis_shortRange_ratio: 0.452504
+cis_longRange_ratio: 0.547496
+
+Sample: HCC70
+valid_interaction: 587876634.000000
+valid_interaction_rmdup: 439133960.000000
+trans_interaction: 46475836.000000
+cis_interaction: 392658124.000000
+cis_shortRange: 129161644.000000
+cis_longRange: 263496480.000000
+valid_interaction_rmdup_ratio: 0.746983
+trans_interaction_ratio: 0.105835
+cis_interaction_ratio: 0.894165
+cis_shortRange_ratio: 0.328942
+cis_longRange_ratio: 0.671058
+
+Sample: HMEC
+valid_interaction: 492430664.000000
+valid_interaction_rmdup: 375991517.000000
+trans_interaction: 27940991.000000
+cis_interaction: 348050526.000000
+cis_shortRange: 163813668.000000
+cis_longRange: 184236858.000000
+valid_interaction_rmdup_ratio: 0.763542
+trans_interaction_ratio: 0.074313
+cis_interaction_ratio: 0.925687
+cis_shortRange_ratio: 0.470661
+cis_longRange_ratio: 0.529339
+
+Sample: MB231
+valid_interaction: 235793172.000000
+valid_interaction_rmdup: 200168329.000000
+trans_interaction: 20676310.000000
+cis_interaction: 179492019.000000
+cis_shortRange: 50110554.000000
+cis_longRange: 129381465.000000
+valid_interaction_rmdup_ratio: 0.848915
+trans_interaction_ratio: 0.103295
+cis_interaction_ratio: 0.896705
+cis_shortRange_ratio: 0.279180
+cis_longRange_ratio: 0.720820
+
