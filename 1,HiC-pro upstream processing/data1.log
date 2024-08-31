@@ -1,0 +1,91 @@
+nohup: ignoring input
+
+Run HiC-Pro 3.1.0
+--------------------------------------------
+2024年 03月 14日 星期四 09:06:22 CST
+Bowtie2 alignment step1 ...
+Logs: logs/BT549/mapping_step1.log
+Logs: logs/HCC70/mapping_step1.log
+Logs: logs/HMEC/mapping_step1.log
+
+--------------------------------------------
+2024年 03月 18日 星期一 05:30:50 CST
+Bowtie2 alignment step2 ...
+Logs: logs/BT549/mapping_step2.log
+Logs: logs/HCC70/mapping_step2.log
+Logs: logs/HMEC/mapping_step2.log
+
+--------------------------------------------
+2024年 03月 19日 星期二 11:46:52 CST
+Combine R1/R2 alignment files ...
+Logs: logs/BT549/mapping_combine.log
+Logs: logs/HCC70/mapping_combine.log
+Logs: logs/HMEC/mapping_combine.log
+
+--------------------------------------------
+2024年 03月 19日 星期二 18:50:27 CST
+Mapping statistics for R1 and R2 tags ...
+Logs: logs/BT549/mapping_stats.log
+Logs: logs/HCC70/mapping_stats.log
+Logs: logs/HMEC/mapping_stats.log
+
+--------------------------------------------
+2024年 03月 19日 星期二 21:44:18 CST
+Pairing of R1 and R2 tags ...
+Logs: logs/BT549/mergeSAM.log
+Logs: logs/HCC70/mergeSAM.log
+Logs: logs/HMEC/mergeSAM.log
+
+--------------------------------------------
+2024年 03月 20日 星期三 05:07:18 CST
+Assign alignments to restriction fragments ...
+Logs: logs/BT549/mapped_2hic_fragments.log
+Logs: logs/HCC70/mapped_2hic_fragments.log
+Logs: logs/HMEC/mapped_2hic_fragments.log
+
+--------------------------------------------
+2024年 03月 20日 星期三 19:00:24 CST
+Merge chunks from the same sample ...
+Logs: logs/BT549/merge_valid_interactions.log
+Logs: logs/HCC70/merge_valid_interactions.log
+Logs: logs/HMEC/merge_valid_interactions.log
+
+--------------------------------------------
+2024年 03月 20日 星期三 19:58:56 CST
+Merge stat files per sample ...
+Logs: logs/BT549/merge_stats.log
+Logs: logs/HCC70/merge_stats.log
+Logs: logs/HMEC/merge_stats.log
+
+--------------------------------------------
+2024年 03月 20日 星期三 19:58:56 CST
+Run quality checks for all samples ...
+Logs: logs/BT549/make_Rplots.log
+Logs: logs/HCC70/make_Rplots.log
+Logs: logs/HMEC/make_Rplots.log
+
+--------------------------------------------
+2024年 03月 20日 星期三 19:59:11 CST
+Generate binned matrix files ...
+Logs: logs/BT549/build_raw_maps.log
+Logs: logs/HCC70/build_raw_maps.log
+Logs: logs/HMEC/build_raw_maps.log
+
+--------------------------------------------
+2024年 03月 20日 星期三 20:30:54 CST
+Run ICE Normalization ...
+Logs: logs/BT549/ice_10000.log
+Logs: logs/BT549/ice_20000.log
+Logs: logs/BT549/ice_40000.log
+Logs: logs/BT549/ice_100000.log
+Logs: logs/BT549/ice_500000.log
+Logs: logs/HCC70/ice_10000.log
+Logs: logs/HCC70/ice_20000.log
+Logs: logs/HCC70/ice_40000.log
+Logs: logs/HCC70/ice_100000.log
+Logs: logs/HCC70/ice_500000.log
+Logs: logs/HMEC/ice_10000.log
+Logs: logs/HMEC/ice_20000.log
+Logs: logs/HMEC/ice_40000.log
+Logs: logs/HMEC/ice_100000.log
+Logs: logs/HMEC/ice_500000.log

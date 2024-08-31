@@ -1,0 +1,61 @@
+nohup: ignoring input
+
+Run HiC-Pro 3.1.0
+--------------------------------------------
+2024年 03月 14日 星期四 09:07:22 CST
+Bowtie2 alignment step1 ...
+Logs: logs/MB231/mapping_step1.log
+
+--------------------------------------------
+2024年 03月 15日 星期五 01:03:25 CST
+Bowtie2 alignment step2 ...
+Logs: logs/MB231/mapping_step2.log
+
+--------------------------------------------
+2024年 03月 15日 星期五 05:29:35 CST
+Combine R1/R2 alignment files ...
+Logs: logs/MB231/mapping_combine.log
+
+--------------------------------------------
+2024年 03月 15日 星期五 06:14:16 CST
+Mapping statistics for R1 and R2 tags ...
+Logs: logs/MB231/mapping_stats.log
+
+--------------------------------------------
+2024年 03月 15日 星期五 06:44:01 CST
+Pairing of R1 and R2 tags ...
+Logs: logs/MB231/mergeSAM.log
+
+--------------------------------------------
+2024年 03月 15日 星期五 08:02:52 CST
+Assign alignments to restriction fragments ...
+Logs: logs/MB231/mapped_2hic_fragments.log
+
+--------------------------------------------
+2024年 03月 15日 星期五 10:25:41 CST
+Merge chunks from the same sample ...
+Logs: logs/MB231/merge_valid_interactions.log
+
+--------------------------------------------
+2024年 03月 15日 星期五 10:31:37 CST
+Merge stat files per sample ...
+Logs: logs/MB231/merge_stats.log
+
+--------------------------------------------
+2024年 03月 15日 星期五 10:31:37 CST
+Run quality checks for all samples ...
+Logs: logs/MB231/make_Rplots.log
+
+--------------------------------------------
+2024年 03月 15日 星期五 10:31:45 CST
+Generate binned matrix files ...
+Logs: logs/MB231/build_raw_maps.log
+
+--------------------------------------------
+2024年 03月 15日 星期五 10:37:53 CST
+Run ICE Normalization ...
+Logs: logs/MB231/ice_10000.log
+Logs: logs/MB231/ice_20000.log
+Logs: logs/MB231/ice_40000.log
+Logs: logs/MB231/ice_100000.log
+Logs: logs/MB231/ice_500000.log
