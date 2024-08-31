@@ -21,9 +21,23 @@ fasterq-dump -e 10 sra文件  #-e是线程，注意reads是单端还是双端,�
 ②要不要merge数据，是下游分析一致性的前提，分析前如果合并了，就不能A模块合并，B模块不合并，即合并与否需要在前提考虑，一旦决定合并或者不合并，后续的数据分析处理就都需要遵守使用一致的数据处理
 ③至于要不要merge数据，原则上是数据能用尽用，主要原因还是查看自己原始fq数据的分辨率深度够不够
 一般染色质结构分析中compartment、TAD、loop等主结构，各种亚结构，以及各种结构内部模块分析过程中需要使用不同精度即分辨率的数据，所以需要提前了解自己hic矩阵数据的分辨率大小
-如果数据比较小，达不到分析高精度结构的分辨率需求，可以通过合并样本rep来达到数据精度的要求，可以参考GENOVA工具中对应参考的范围
-(4)hic-pro中的配置文件config-hicpro.txt等衍生同类文件，设置细节见【bishe】流程记录1 word，具体结果形式可参考上传的config-hicpro.txt（处理TNBC中2类）以及config-hicpro_mb231.txt（处理TNBC中最后一类MB231），主要依据github软件官网修改文件依赖路径+服务器执行参数等，以及注意分辨率参数的设置（bin size本项目设置为10,20,40,100,500kb），建议阅读官网手册以及自己分析3层次等结构数据需求设置对应的分辨率，以及注意自己数据的大小
-(4)数据分辨率大小的设置：
-
+如果数据比较小，达不到分析高精度结构的分辨率需求，可以通过合并样本rep来达到数据精度的要求，可以参考GENOVA工具中对应参考的分辨率范围
+一般使用juicer官网github中的脚本calculate_map_resolution.sh，用于计算评估分辨率大小，判断能不能直接用于下游数据分析,相关脚本见shell脚本resolution；
+此项目评估之后无法使用，所以使用cat将上游的fq数据依据技术性rep又合并了，然后二次执行了hic-pro
+即第一次分rep的fq进行hicpro分析分辨率，理论上可以使用hicpro的输出数据格式matrix+bed或者是validpairs等进行合并，或者是转换为cool/mcool、hic、h5等数据格式之后依然可以直接合并——暂时没有找到该方面的方法以及工具，所以本项目直接返回源头合并上游fq文件，从头再来。据评估，500G fq/样本，一共4个样本，运行15~20线程，耗时7天左右（可以查看日志文件data1、data2.log）。
+(4)hic-pro中的配置文件config-hicpro.txt等衍生同类文件，设置细节见【bishe】流程记录1 word，具体结果形式可参考上传的config-hicpro.txt（处理TNBC中2类）以及config-hicpro_mb231.txt（处理TNBC中最后一类MB231），主要依据github软件官网修改文件依赖路径+服务器执行参数等，以及注意分辨率参数的设置（bin size本项目设置为10,20,40,100,500kb），建议阅读官网手册以及自己分析3层次等结构数据需求设置对应的分辨率，以及注意自己数据的大小.
+理论上10kb是就能够分析loop了，当然数据精度需要进一步查询paper确定
+5,hicpro分析结果处理：
+(1) hicpro样本质控报告：hic_results/pic
+参考https://github.com/nservant/HiC-Pro/blob/master/doc/MANUAL.md，该项目样本图见hicpro_qc_plot文件夹，主要关注顺反互作比例，与下列脚本处理相同，解读细节见【bishe】流程记录1 word
+(2)hic_results/stats中存放的统计文件，使用脚本hicpro_collectStats.sh进行分析收集
+cmdRun.txt是执行hicpro_collectStats.sh脚本自然记录下来的命令行shell命令
+统计结果文件样本见hicpro-xxxstat（共4个文件），几个hicpro的stat都是记录hicpro在执行过程中每个中间步骤获得的测序reads配对统计情况，暂时只有mergestat.txt结果可用，展示最后的顺反互作比例等，但是数据上有问题，参考https://github.com/dozmorovlab/PDX-HiC_processingScripts但是x2区别，待处理验证！
+针对mergestat文件的二次处理，即统计实际情况下的顺反互作比例，对已经合并rep的样本的统计，使用py脚本stat_ratio_merged.py，结果在对应txt中，注意处理的py脚本没有矫正过，待矫正！
+总之，这里的统计sh+py图示结果，与（1）中hicpro自己结果比较
+(3)hic_results/matrix文件夹中的matrix+bed文件（有raw以及iced文件夹，该项目主要使用raw文件夹中的配对矩阵文件），以及data/中的allvalidpairs文件，是后续hic分析处理的核心数据，也是hicpro质控输出的主要矩阵数据
+6,hicpro结果矩阵文件格式转换：从hicpro数据格式转换为其他数据格式，主要用于后续各种下游数据处理软件处理对接
+(1)转换为hic文件：使用hicpro官网中的hicpro2juicebox.sh脚本
+执行该项目时使需要安装juicer官网对应java软件，注意官主要是juicer_tools，注意软件在juicebox还是在该开发实验室的其他juicer相关维护仓库中，另外注意安装的java软件版本，该项目使用v1，v2处于开发维护debug中
 
 
