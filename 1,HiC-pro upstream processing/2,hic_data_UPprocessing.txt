@@ -26,3 +26,4 @@ hicrep处理之后的矩阵文件，见例BT549_HCC70,BT549_HMEC,HCC70_HMEC等tx
 5，其他hic全局3D基因组feature：
 (1)参考PDX nature文献模块，
 (2)以及GENOVA、hicexplorer等多模块软件能接着做的部分
+另外部分使用GENOVA做的也是上游hic全局feature的图放在了genova_feature文件夹中
