@@ -1,1 +1,25 @@
+区室分析主要输入文件，为上游分析1中>=100kb分辨率的hic矩阵文件（mcool数据格式），除开个别特定模块所需分辨率要求，区室分析主模块选取分辨率>=100kb;
+绝大部分模块分析由R包GENOVA完成，且遵循官方github中vignettes，注意指南中尚且有很多模块未实现尝试！解读细节见【bishe】流程记录1 word
+注意mcool文件使用load_contacts函数导入GENOVA中的参数设置，是否需要再矫正？
+1,AB compartment分析：主要是分析样本内A/B区室状况，见ABsaddle.Rmd脚本1~1700行左右
+（1）compartment_score函数主要绘制区室得分，即AB区室PCA轴上得分正负图，分析哪些区域是A区室，哪些区域是B区室；
+（2）saddle函数用于定量化AA/BB/AB 3类区室之间的交互情况，即展示交互数量和交互强度的热图估计，注意脚本中有2处saddle热图绘制（第1处使用GENOVA的saddle函数，第2次自己数据分析+绘图函数处理）；
+（3）quantify函数用于定量化saddle结果，分析区室强度compartment-strength：
+ (AA+BB) / (AB+BA)区室分布比例分析，实际上即saddle-strength分析；
+Compartmentalization score分析，也是 (AA+BB) / (AB+BA)比例分析，为PDX nature文献分析中自定义的1个量，探究的意义以及计算策略与compartment-strength/saddle-strength一致，除了在y轴计算量上做的不同转换
+（4）统计分析Contact enrichment：
+选取top20%的A以及bottom20%的B，GENOVA源代码中也有相关计算部分，属于自定义；
+注意此处的Contact enrichment以及上面（3）中的Compartmentalization score并没有明确定义，参考PDX nature文献进行理解，只有compartment-strength/saddle-strength是明确定义的，
+可以将Contact enrichment+Compartmentalization score理解为compartment-strength/saddle-strength的个性化衍生数据处理分析！！！
 
+所有输出结果见100kb_genova、500kb_genova、compartment upstream（同样是以上模块的分析结果，主要是一些次要结果图示）文件夹
+2,AB区室转换模块分析:此处为区室分析的重点，主要使用100kb分辨率数据
+主要使用dchic（https://github.com/ay-lab/dcHiC）分析转换区室情况，另外使用R脚本分析下游数据
+（1）dchic主要脚本见run_dchic.sh：
+主要修改dchicf.r的路径（修改成dchic软件安装之后最外层的dchicf.r脚本路径），以及输入文件input.HMEC_TNBC.txt（使用hicpro原生输出数据，本项目使用raw中的matrix+bed），rep分类要分类好；
+另外注意input的txt中matrix+bed最好移除异常chr数据（这在上游hicpro的处理中就可以进行，只保留1-22+XY）,另外也建议移除chrY，依据官方的指示；
+dchic输出结果目录细节解读见【bishe】流程记录1 word以及官网github；
+
+dchic运行脚本中有关于loop的分析模块，本项目在运行时没有执行，后续可以尝试!!!
+（2）dchic下游R分析：
+主要是
