@@ -1,0 +1,2703 @@
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+# Set up the environment
+library(knitr)
+opts_chunk$set(cache.path = "cache/", fig.path = "img/", cache = F, tidy = T, fig.keep = "high", echo = F, dpi = 100, warnings = F, message = F, comment = NA, warning = F, results = "as.is", fig.width = 10, fig.height = 6, cache.lazy = FALSE) # out.width=700,
+library(pander)
+panderOptions("table.split.table", Inf)
+set.seed(1)
+library(dplyr)
+options(stringsAsFactors = FALSE)
+```
+
+Input Data from Ay lab `dchic`
+
+Processing differential compartment results from `dcHi-C` analysis. Significant changes may be from A to A (AA), B to B (BB), A to B (AB), and B to A (BA).
+
+- Proportion of significant AB compartment changes, genome- and Chromosome-specific. Sortable tables and plots.
+- Karyoplots 染色体核型图
+- Overlapping gene enrichment analysis, KEGG, MSigDb. gene富集分析
+
+Output in `GoogleDrive/HiC_files/results/AB_compartments/dcHiC_2021-09-03/results`
+
+- BED files for each type of AB compartment change. Named as `BED_<compartment>_<resolution>_<padj_compartment_cutoff>.bed`, e.g., `BED_AA_250kb_0.01.xlsx`
+- `AB_gene_summary_250kb.xlsx` Excel file with genes overlapping AB compartment switches (individual worksheets), other summaries.
+
+# Libraries
+
+```{r libraries}
+library(annotables)
+library(rCGH)
+library(GenomicRanges)
+library(clusterProfiler)
+# library(enrichR)
+library(tidyr)
+library(stringr)
+library(writexl)
+library(readr)
+library(ggplot2)
+library(reshape2)
+library(ggsci)
+library(grid)
+library(gridExtra)
+library(BSgenome)
+library(msigdbr)
+library(karyoploteR)
+#options(scipen = 999999999999999) 设置数值的显示精度，避免科学计数法（scientific notation）显示，没什么用
+library(data.table)
+library(MDmisc) # BiocManager::install("mdozmorov/MDmisc", update = FALSE)
+library("ggstatsplot") #主要就是后面对应的箱线图的时候需要进行美化，可以选用其他的ggplot函数
+```
+
+# Settings
+主要是padj的阈值，这一块可以看最后面的gene list，如果数量不合适，就可以考虑修改padj，改为0.05或者是0.01等
+！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+
+```{r}
+# General settings
+# Cutoff for significant AB compartment changes下面设置的cutoff阈值，如果是使用group-ori-未过滤，可以设置为0.1或者自己修改，如果是设置0.1就是原来dchic输出中的结果
+padj_compartment_cutoff <- 0.1
+
+# Rerun setting, affects overwriting files.后续如果要重新运行，这里记得要再次修改
+rerun <- TRUE
+# How to sort the barchart. If TRUE, only a sum of AB and BA changes is used. 
+# If FALSE, the total significant changes (AB, BA, AA, BB) is used
+#此设置影响柱状图的排序方式。如果设置为 TRUE，柱状图将基于 AB 和 BA 变化的总和进行排序。如果设置为 FALSE，柱状图将基于 AB、BA、AA 和 BB 类别的总显著变化进行排序。
+AB_BA <- TRUE
+```
+
+
+```{r}
+# dcHiC_analysis settings
+# fileNameIn1 <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/HMEC_vs_BT549_100kb_dchic/DifferentialResult/HMEC_BT549_100Kb/fdr_result/differential.intra_sample_group.Filtered.pcOri.bedGraph" # Filtered results，是dchic设置fdr阈值的输出，默认是下面的0.1阈值padj筛选
+# fileNameIn2 <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/HMEC_vs_BT549_100kb_dchic/DifferentialResult/HMEC_BT549_100Kb/fdr_result/differential.intra_sample_group.pcOri.bedGraph" # Full results，这是原始ori的pc1数据，没有经过dchic设置的fdr阈值
+
+# dcHiC analysis settings
+dir_data <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/HMEC_vs_BT549_100kb_dchic/DifferentialResult/"
+fileNameIn1 <- "HMEC_BT549_100Kb/fdr_result/differential.intra_sample_group.Filtered.pcOri.bedGraph" #filtered results，效果相当于下面的in2+padj阈值0.1，为了之后可以随时修改阈值检查效果方便，下面一切分析都使用in2
+fileNameIn2 <- "HMEC_BT549_100Kb/fdr_result/differential.intra_sample_group.pcOri.bedGraph" # Full results，以这个文件为主，设置阈值去筛选
+#其实此处的in2，也就是原始的全部输出，其实理论上讲HMEC_BT549_100Kb/viz/files/intra_compartment.bedGraph和HMEC_BT549_100Kb/fdr_result/differential.intra_sample_group.pcOri.bedGraph室没有多大区别的，因为dchic的输出中其实就是将后者中为0的数据取了个padj最小的，然后整体上都-log10化了
+#所以整体上来讲，使用哪个都是没有太大问题的，因为如果是使用intra的话后面的数据处理中有将所有的padj的值都进行了-log10的反变换，所以其实实际上影响基本上没有，反正就是用哪个文件都一样
+
+
+# Resolution dchic的分析一律使用100kb
+res_number <- 100000
+res_text <- "100kb"
+# Results folder
+dir_results <- file.path(dir_data, "results") 
+#所有文件的输出都是在dchic建立的各自对应的比对文件夹下的下的DifferentialResult中！！！！！！！！！！！！！！！！！！！！！！1
+dir.create(dir_results, recursive = TRUE) # Create if does not exist
+# All results
+fileNameOut1 <- file.path(dir_results, paste0("AB_gene_summary_", res_text,"_", padj_compartment_cutoff, ".xlsx"))
+# BED file name
+fileNameOut2 <- file.path(dir_results, paste0("AB_", res_text, "_", padj_compartment_cutoff, ".bed"))
+```
+
+## Organism selection
+
+```{r organism}
+chr <- c(paste("chr", 1:22, sep = ""), "chrX") # Chromosomes，原先代码中没有展示x染色体，如果后面关于chr报错，可以改回paste0("chr", c(1:22))！！！！！！！！！！！
+# Import centromeric regions from rCGH 着丝粒还是问题染色体区域，要排除
+hg19_centro <- hg19
+# Change chromosome indicator to include "chr"
+hg19_centro$chrom <- paste0("chr", hg19_centro$chrom)   #chr23以及24改成X和Y,先不处理，看看有没有后续改变的需要
+#如果要修改，就是用chrom_map <- c(paste0("chr", 1:22), "chrX", "chrY")
+#hg19_centro$chrom <- chrom_map[as.numeric(hg19_centro$chrom)]
+
+# Make GRanges from centromeric locations
+hg19_centro.gr <- makeGRangesFromDataFrame(hg19_centro, seqnames.field = "chrom", start.field = "centromerStart", end.field = "centromerEnd", keep.extra.columns = TRUE)
+#根据中心着丝粒区域的起始位置和结束位置创建GRanges 对象
+
+library(org.Hs.eg.db) #导入基因注释信息，指定要使用的数据库、物种和 KEGG 数据集
+OrgDb <- "org.Hs.eg.db"
+species <- "hsa"
+KEGG <- "KEGG_2019_Human"
+
+# Annotables 筛选出符合条件的基因注释信息，并进行处理，包括去除重复项和空值项
+#从 grch37 数据框中选择了三列数据，分别是 "symbol"、"description" 和 "biotype"，获取规则染色体的这三列注释，可以通过grch37查看
+gene_annotations <- grch37[!(grepl("_", grch37$chr) | grepl("GL", grch37$chr)), c("symbol", "description", "biotype")]
+gene_annotations <- gene_annotations[!duplicated(gene_annotations$symbol) & !is.na(gene_annotations$symbol) & gene_annotations$description != "", ]
+
+# BSgenome settings 从指定的基因组数据包中获取染色体的长度信息，并将染色体名称和长度整理到一个数据框中
+bsgenome <- "BSgenome.Hsapiens.UCSC.hg19"
+chrom.sizes <- data.frame(chr = chr, size = seqlengths(getBSgenome(genome = bsgenome, masked = FALSE))[chr])
+
+# Get all human genes
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+genomewide.genes <- genes(TxDb.Hsapiens.UCSC.hg19.knownGene)
+#single.strand.genes.only=FALSE,上面这里会有一些正义反义链上的gene丢失掉
+genomewide.genes <- keepSeqlevels(genomewide.genes, c(paste0("chr", 1:22), "chrX"), pruning.mode = "tidy")
+#调用了 keepSeqlevels 函数，用于保留指定的染色体。在这个例子中，保留了 1 到 22 号染色体和 X 染色体
+gene_symbol <- bitr(genomewide.genes$gene_id, fromType = "ENTREZID", toType = "SYMBOL", OrgDb = OrgDb)
+#调用了 bitr 函数，用于将基因 ID 转换为基因符号。fromType 参数指定了输入的 ID 类型，toType 参数指定了输出的 ID 类型，OrgDb 参数指定了要使用的基因注释数据库
+gene_symbol <- left_join(gene_symbol, gene_annotations, by = c("SYMBOL" = "symbol"))
+#将基因符号与基因注释数据进行关联。by 参数指定了关联的列
+gene_symbol_entrez <- left_join(data.frame(gene_id = genomewide.genes$gene_id), gene_symbol, by = c("gene_id" = "ENTREZID"))
+#将基因 ID 与基因符号进行关联。by 参数指定了关联的列
+genomewide.genes$symbol <- gene_symbol_entrez$SYMBOL #将基因符号添加到 genomewide.genes 数据框中
+genomewide.genes$description <- gene_symbol_entrez$description #将基因描述添加到 genomewide.genes 数据框中
+genomewide.genes$biotype <- gene_symbol_entrez$biotype  #将基因生物类型添加到 genomewide.genes 数据框中
+
+
+# MSigDb organism
+msigdbr_org <- "Homo sapiens" # species
+```
+
+# Load A/B data and Replace Centromeric Regions with NaN 去除问题染色体区域
+
+```{r}
+# mtx_filtered <- read_tsv(file.path(dir_data, fileNameIn1)) # Filtered，这里可以直接读取前面0.1设置的数据
+# mtx_filtered <- as.data.frame(mtx_filtered)
+mtx_full <- read_tsv(file.path(dir_data, fileNameIn2)) # Full
+
+# Log10-untransform the p-value注意，下面的操作如果是导入viz文件夹中的intra的bedGraph文件，因为是从full的ori数据中执行了-log10，所以需要转化回来，但是我这里导入的是直接原始的group-ori-未过滤的数据，按照dchic的操作，是不需要再转换的，本身就是原生的padj值，详情参考上面中的filenamein2！！！！！！！！！！！！！！！！！！！1
+#mtx_full$padj <- 10^(-mtx_full$padj)
+
+#下面其实和上一个代码块中对着丝粒区域的处理是一致的
+# Chromosome sizes
+chrom_sizes <- data.frame(chr = chr, size = seqlengths(getBSgenome(genome = bsgenome, masked = FALSE))[chr])
+# Make GRanges #创建一个GRanges对象，表示每个染色体的范围
+chrom_sizes_gr <- GRanges(seqnames = paste0(chrom_sizes$chr), ranges = IRanges(start = 0, end = chrom_sizes$size))
+# import centromeric regions from rCGH
+hg19_centro<-hg19
+# change chromosome indicator to include "chr"
+hg19_centro$chrom <- paste0("chr", hg19_centro$chrom)
+#但是这里需要修改，将chr23和24修改为x和y，问题同上个代码块，因为这里要实际处理数据了
+hg19_centro$chrom <- ifelse(hg19_centro$chrom == "chr23", "chrX",
+                            ifelse(hg19_centro$chrom == "chr24", "chrY", hg19_centro$chrom))
+
+# make gRanges from centromeric locations 创建一个GRanges对象，表示每个染色体的中心粒的范围
+hg19_centro.gr<-makeGRangesFromDataFrame(hg19_centro, seqnames.field = "chrom", start.field = "centromerStart", end.field = "centromerEnd", keep.extra.columns = TRUE)
+# make gRanges from the resolution specific coordinates 创建一个GRanges对象，表示基因组中的一些特定区域，这里使用的就是dchic结果中识别出来的区室区域坐标
+AB.gr<-GRanges(seqnames = mtx_full$chr, IRanges(start = mtx_full$start, end = mtx_full$end))
+mcols(AB.gr) <- mtx_full[, c("BT549", "HMEC", "sample_maha", "padj")] #将选定的列设置为GRanges对象的元数据,这些都是原来的mtx/也就是bedGraph中能够查看的
+
+# Remove regions outside of chromosome bounds #删除了与染色体边界之外的区域，先矫正AB区室的chr范围
+olap_chrom <- findOverlaps(AB.gr, chrom_sizes_gr)
+AB.gr <- AB.gr[ queryHits(olap_chrom) ]
+# Remove overlaps between the compartments and the centromeric regions #查找两个GRanges对象之间的重叠区域，即dchic识别出来的区室与中心粒区域
+olap_centromere<-findOverlaps(AB.gr, hg19_centro.gr)
+AB.gr$BT549[ queryHits(olap_centromere) ] <- NA
+AB.gr$HMEC[ queryHits(olap_centromere) ] <- NA
+
+mtx_full <- as.data.frame(AB.gr)
+colnames(mtx_full)[1] <- "chr"
+
+#下面数据中的处理是源代码的，不用管，反正我是用来0.1的官方阈值
+# summary(mtx_filtered$padj) # max: 0.01
+# summary(mtx_full$padj) # max: 1
+# dim(mtx_full[mtx_full$padj <= max(mtx_filtered$padj), ]) # Filtered Full = Filtered
+# summary(mtx_filtered$sample_maha)
+# summary(mtx_full$sample_maha)
+# plot(density(mtx_filtered$glosh))
+# plot(density(mtx_full$glosh))
+# cor(mtx_filtered$sample_maha, mtx_filtered$BT549 - mtx_filtered$HMEC)
+# View(data.frame(mtx_filtered$sample_maha, mtx_filtered$BT549 - mtx_filtered$HMEC))
+```
+
+# Genome-wide proportion of A/B compartments 整体区室比例
+
+```{r}
+# Genome-wide proportion of AB compartments
+conditions <- c("HMEC", "BT549") # Conditions
+
+# Matrix to store results
+proportioNumber_AB_genomewide <- matrix(data = 0, ncol = 2, nrow = 2) #创建一个矩阵，用于存储两种条件下的A/B区域的比例,所以是2x2
+colnames(proportioNumber_AB_genomewide) <- conditions
+rownames(proportioNumber_AB_genomewide) <- c("Proportion A", "Proportion B")
+# For a given condition, calculate the proportion of AB compartments
+for (j in conditions) {
+  proportioNumber_A <- sum(mtx_full[, j] >  0, na.rm = TRUE) / length(mtx_full[, j][!is.na(mtx_full[, j])] )
+  ##计算了mtx_full数据框中的某一列（由j指定）中大于0的值的数量，并除以该列中非缺失值的总数，以得到A区域的比例
+  proportioNumber_B <- sum(mtx_full[, j] <= 0, na.rm = TRUE) / length(mtx_full[, j][!is.na(mtx_full[, j])] )
+  ##计算了mtx_full数据框中的某一列（由j指定）中小于等于0的值的数量，并除以该列中非缺失值的总数，以得到B区域的比例
+  proportioNumber_AB_genomewide["Proportion A", j] <- proportioNumber_A
+  proportioNumber_AB_genomewide["Proportion B", j] <- proportioNumber_B
+}
+#使用 sum 函数计算满足条件 mtx_full[, j] > 0 的元素数量，除以非缺失值的总数，得到比例，计算大于0的值（即A区室）在数据中的比例（因为原始pc1数据中exp列就是pc1原始值，所以用j），B同理
+kable(round(proportioNumber_AB_genomewide, digits = 3))
+
+#	HMEC	BT549
+#Proportion A	0.52	0.486
+#Proportion B	0.48	0.514
+```
+
+# Chromosome-specific proportion of A/B compartments 染色体区室比例
+
+- "HMECA", "HMECB", "BT549A", "BT549B" - the proportion of A and B compartments in each condition.
+- "A_log2FC", "B_log2FC" - log2 fold change in the A/B compartment proportions between BT549 and HMEC conditions.AB 区室比例的对数折叠变化 (log2 fold change) between BT549 和 HMEC 条件
+- "AB_log2FC" - difference between the A/B ratios in each condition.每个条件下 A 区室比例与 B 区室比例的对数折叠变化
+
+```{r}
+# Matrix to store results 存储每个染色体在两个条件下的A/B区域的比例
+proportioNumber_AB_chromosome <- matrix(data = 0, ncol = 4, nrow = length(chr))
+colnames(proportioNumber_AB_chromosome) <- c("HMECA", "HMECB", "BT549A", "BT549B")
+rownames(proportioNumber_AB_chromosome) <- chr
+# For a given condition, calculate the proportion of AB compartments
+for (i in chr) {
+  for (j in conditions) {
+    mtx_full_subset <- mtx_full[mtx_full$chr == i, j]   
+    #对于每个染色体 i 和每个条件 j，从 mtx_full 数据框中选取染色体为 i 且条件为 j 的子集
+    proportioNumber_AB_chromosome[i, paste0(j, "A")] <- sum(mtx_full_subset >  0, na.rm = TRUE) / length(mtx_full_subset[!is.na(mtx_full_subset)])
+    proportioNumber_AB_chromosome[i, paste0(j, "B")] <- sum(mtx_full_subset <= 0, na.rm = TRUE) / length(mtx_full_subset[!is.na(mtx_full_subset)])
+  }
+}
+# Convert to data frame
+proportioNumber_AB_chromosome <- data.frame(Chromosome = rownames(proportioNumber_AB_chromosome), proportioNumber_AB_chromosome)#加了个染色体行名
+# Append ratio of A compartment change 添加了一个新的列"A_log2FC"，表示A区域的比例变化,在两个情况中
+proportioNumber_AB_chromosome <- proportioNumber_AB_chromosome %>% mutate(A_log2FC = log2(BT549A) - log2(HMECA))
+# Append ratio of B compartment change 同上是B
+proportioNumber_AB_chromosome <- proportioNumber_AB_chromosome %>% mutate(B_log2FC = log2(BT549B / HMECB))
+# Append ratio of A/B ratio compartment change A/B比率在不同情况下的差异
+proportioNumber_AB_chromosome <- proportioNumber_AB_chromosome %>% mutate(AB_log2FC = log2(HMECA / HMECB) - log2(BT549A / BT549B))
+# Display interactively
+DT::datatable(round_df(proportioNumber_AB_chromosome, 5), options = list(pageLength = 22))
+
+#上面是动态展示，建议是直接保存到csv文件中！！！！！！！！！！！！！！！！！！！！！！！！！！！
+write.csv(proportioNumber_AB_chromosome, "100kb_HMEC_vs_BT549_proportioNumber_AB_chromosome.csv", row.names = TRUE)
+
+
+```
+
+# Data preparation, filtered 提取出dchic原始输出中经过padj cutofff阈值过滤的部分数据
+结果文件AB_conditions_assigned就是padj过滤之后+call AB的原始dchic结果数据框
+
+```{r}
+# Create data that resembles objects used in 05_AB_eigenvector，下面的EV就是特征向量值，就是原始pc1的值，就是±表征AB的值
+AB_HMEC <- data.frame(chr   = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "chr"] %>% unlist,
+                    start = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "start"] %>% unlist,
+                    end   = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "end"] %>% unlist,
+                    EV    = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "HMEC"] %>% unlist)
+AB_BT549 <- data.frame(chr   = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "chr"] %>% unlist,
+                    start = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "start"] %>% unlist,
+                    end   = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "end"] %>% unlist,
+                    EV    = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "BT549"] %>% unlist)
+#AB_HMEC 和 AB_BT549 数据框包含了染色体区域的信息，包括染色体名称 (chr)、起始位置 (start)、终止位置 (end) 以及 EV 值 (EV)
+AB_metadata <- data.frame(sample_maha = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "sample_maha"] %>% unlist,
+                          padj  = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "padj"] %>% unlist)
+#AB_metadata 数据框包含了额外的元数据信息，包括 sample_maha 和 padj
+#上面实际上就是将dchic的输出拆分成了两份，一份是exp+染色体数据，另外一份是检验性数据
+
+# run assignment function on the data 依据EV即pc1值±为新列compartment赋值AB
+AB_HMEC_assigned <- AB_HMEC; AB_HMEC_assigned$compartment <- ifelse(AB_HMEC_assigned$EV >= 0, "A", "B")
+AB_BT549_assigned <- AB_BT549; AB_BT549_assigned$compartment <- ifelse(AB_BT549_assigned$EV >= 0, "A", "B")
+
+# Add dataset signifier to each column for distinguishing the two data sets in combined data frame列名添加前缀，以便区分两个数据集在合并数据框中的来源
+colnames(AB_HMEC_assigned) <- paste0("HMEC", colnames(AB_HMEC_assigned))
+colnames(AB_BT549_assigned) <- paste0("BT549", colnames(AB_BT549_assigned))
+
+# combine the two datasets
+AB_conditions_assigned <- cbind(AB_HMEC_assigned, AB_BT549_assigned)
+
+# create a column for the difference in EV for each region between the two datasets#数据框创建了一个名为 D.EV 的新列，用于存储两个数据集之间 EV 列的差异
+AB_conditions_assigned$D.EV <- AB_conditions_assigned$BT549EV - AB_conditions_assigned$HMECEV  #EV是score相减，变化
+AB_conditions_assigned$compartment <- paste0(AB_conditions_assigned$HMECcompartment, AB_conditions_assigned$BT549compartment) #这里是AB.BA等变化 
+AB_conditions_assigned <- cbind(AB_conditions_assigned, AB_metadata)#前面从原始mtx数据中提取出来两个子数据，一个就是上面的ABcondition，要进行操作，另外一个是metadata不进行操作
+
+write.csv(AB_conditions_assigned, "100kb_HMEC_vs_BT549_AB_conditions_assigned_filtered.csv", row.names = TRUE)
+```
+
+# Data preparation, unfiltered 不经过padj过滤，还是使用原始的dchic产出的group-ori的数据
+结果文件AB_conditions_assigned_all就是没有padj过滤但是call AB的原始dchic结果数据框
+
+```{r}
+# Create data that resembles objects used in 05_AB_eigenvector
+AB_HMEC_all <- data.frame(chr   = mtx_full[, "chr"  ] %>% unlist,
+                        start = mtx_full[, "start"] %>% unlist,
+                        end   = mtx_full[, "end"  ] %>% unlist,
+                        EV    = mtx_full[, "HMEC"   ] %>% unlist)
+AB_BT549_all <- data.frame(chr   = mtx_full[, "chr"  ] %>% unlist,
+                        start = mtx_full[, "start"] %>% unlist,
+                        end   = mtx_full[, "end"  ] %>% unlist,
+                        EV    = mtx_full[, "BT549"   ] %>% unlist)
+AB_metadata_all <- data.frame(sample_maha = mtx_full[, "sample_maha"] %>% unlist,
+                          padj  = mtx_full[, "padj"] %>% unlist)
+
+# run assignment function on the data
+AB_HMEC_all_assigned <- AB_HMEC_all; AB_HMEC_all_assigned$compartment <- ifelse(AB_HMEC_all_assigned$EV >= 0, "A", "B")
+AB_BT549_all_assigned <- AB_BT549_all; AB_BT549_all_assigned$compartment <- ifelse(AB_BT549_all_assigned$EV >= 0, "A", "B")
+
+# Add dataset signifier to each column for distinguishing the two data sets in combined data frame
+colnames(AB_HMEC_all_assigned) <- paste0("HMEC", colnames(AB_HMEC_all_assigned))
+colnames(AB_BT549_all_assigned) <- paste0("BT549", colnames(AB_BT549_all_assigned))
+
+# combine the two datasets
+AB_conditions_assigned_all <- cbind(AB_HMEC_all_assigned, AB_BT549_all_assigned)
+
+# create a column for the difference in EV for each region between the two datasets
+AB_conditions_assigned_all$D.EV <- AB_conditions_assigned_all$BT549EV - AB_conditions_assigned_all$HMECEV
+AB_conditions_assigned_all$compartment <- paste0(AB_conditions_assigned_all$HMECcompartment, AB_conditions_assigned_all$BT549compartment)
+AB_conditions_assigned_all <- cbind(AB_conditions_assigned_all, AB_metadata_all)
+
+write.csv(AB_conditions_assigned_all, "100kb_HMEC_vs_BT549_AB_conditions_assigned_unfiltered.csv", row.names = TRUE)
+```
+
+
+## Exploratory analysis of eigenvector differences and other measures 就是前面的filter以及unfilter的数据，因为已经保存为csv文件了
+
+```{r}
+DT::datatable(AB_conditions_assigned)
+#DT::datatable(AB_conditions_assigned_all)
+```
+
+
+# RLE, Run Length Encoding
+确定连续区域中具有相同标识的区域（例如，从 A 到 A，从 A 到 B 等）
+利用运行长度编码 (Run-Length Encoding, RLE) 来确定连续区域中具有相同身份的区室（例如，A 到 A，A 到 B等）的长度和身份
+Rle for determining consecutive regions of compartments with same identity (e.g. A to A, A to B, etc )
+
+下面用的数据是AB_conditions_assigned，也就是padj过滤之后的区室数据框
+ABrun_all
+ABrun_AB
+ABrun_BA
+
+```{r}
+# empty dataframe for the RLE information to be stored
+ABrun_all <- data.frame()
+# for each chromosome
+for (i in chr) {
+  # first subset by chromosome
+  AB_conditions_assigned_chr <- subset(AB_conditions_assigned, HMECchr == i)
+  # run RLE and extract the results into a dataframe. Contains the length of each continuous segment and the identity of the run (AB, BA, AA, BB). Length is in number of segments of each segment type, so multiply by resolution.
+  #将运行长度编码的结果转换为数据框，其中包含了连续相同值的长度和这些值的标识
+  #对于每个染色体，首先通过染色体进行子集操作，然后运行 RLE 并将结果提取到一个数据框中。这个数据框包含了每个连续段的长度以及区室类型（AB，BA，AA，BB）。长度以每个段类型的段数表示，因此需要乘以分辨率来获得实际长度
+  ABrun <- data.frame(lengths = unclass(rle(AB_conditions_assigned_chr$compartment)$lengths * res_number), compartment = unclass(rle(AB_conditions_assigned_chr$compartment)$values))
+  # Fix for the end coordinate of the chromosome not spanning full resolution bin size 修正最后一个区域的长度，因为染色体的末尾可能不是完整的分辨率大小
+  #将 ABrun 数据框中最后一行的 lengths 列的值设置为 ABrun$lengths 列的最后一个值减去分辨率的大小再加上染色体的长度
+  ABrun[nrow(ABrun), "lengths"] <- last(ABrun$lengths) - res_number + (max(AB_conditions_assigned_chr$HMECend) - max(AB_conditions_assigned_chr$HMECstart) + 1)
+  # rearrange the results of rle to get the coordinates of the AB compartments to correspond to resolution size调整 RLE 结果，使得AB区域的坐标对应于分辨率大小。将起始坐标设为零，并使用长度的累积和来确定区域范围的结束坐标
+  # make the start coordinate zero
+  ABrun$start <- 0
+  # use the cumulative sum of the lengths at each row to determine the end coordinates of the region range 
+  ABrun$end <- cumsum(ABrun$lengths)
+  
+  #对于每个区域，使用偏移坐标来设置起始坐标，并修正每个区域的起始坐标，以确保它们的结束坐标是下一个区域的起始坐标加1。同时修正第一个区域的起始坐标，因为它是NA
+  # use a lag of one to offset the end coordinates
+  lag <- lag(ABrun, 1L)
+  # use the offset coordinates in the lag object to set the start coordinates
+  ABrun$start <- lag$end
+  # fix start coordinates of each range so that they end in 1; otherwise each consecutive start coordinate is the same as the previous region's end coordinate
+  ABrun$start <- ABrun$start + 1
+  # fix first region's start coordinate, which is an NA, by changing it simply to 1
+  ABrun[1, "start"] <- 1
+  # add a column with the chr
+  ABrun$chr <- i
+  # combine the data for each chromosome into a whole genome object
+  ABrun_all <- rbind(ABrun_all, ABrun)
+}
+# subset the master dataframe of all run lengths to just those for A to A and B to B for downstream gene analysis.
+#将所有染色体的数据组合到 ABrun_all 中，然后从中选择 A 到 B 和 B 到 A 的区域，以用于后续的基因分析。这些子集分别保存在 ABrun_AB 和 ABrun_BA 中
+ABrun_AB <- subset(ABrun_all, compartment == "AB")
+ABrun_BA <- subset(ABrun_all, compartment == "BA")
+```
+
+# Summary of AB compartments
+
+- Only significant changes are considered.
+- Changes within the same compartment type are possible.
+- "Percent_XX" - percent of AB compartment changes with respect to chromosome length.
+- "Number_XX" - number of resolution bins of AB compartment changes.
+- "AB/BA_min/max/med" - min mean and max run lengths for AB and BA compartment changes for each chromosome, calculations are divided by 1000 to convert bases to kb
+仅考虑显著性变化。
+同一区室类型内的变化是可能的。
+"Percent_XX" - AB区室变化占染色体长度的百分比。
+"Number_XX" - AB区室变化的分辨率箱数。
+"AB/BA_min/max/med" - 每个染色体的AB和BA区室变化的最小、平均和最大运行长度，计算结果除以1000以转换为kb单位。
+
+
+结果文件
+AB_summary 数据框将包含了染色体上AB区室变化的摘要信息，包括区室类型比例、区室变化百分比以及区室变化的运行长度等信息
+使用的是过滤后的dchic区室数据（用的数据是AB_conditions_assigned，也就是padj过滤之后的区室数据框）
+HMEC_A 染色体chr上HMEC A区室占据染色体chr全长的百分比
+Percent_AA  AA类型的区室变化在染色体长度中的百分比
+Number_AA  AA类型的区室变化的bin数目
+AB_min 每条chr上AB区室变换的最小bin
+```{r}
+# empty data frame to contain the summary data
+AB_summary <- data.frame(chr = chr)
+
+# modify how the chromosomes in the chom.sizes object are formatted. Adds "chr" to make it compatible with the RLE and combined EV datasets
+# chrom.sizes$chr <- paste0("chr", chrom.sizes$chr)
+
+for (i in chr) {
+  #print(chr)
+  # subset the combined data by chromosome
+  AB_conditions_assigned_chr <- subset(AB_conditions_assigned, HMECchr == i)
+  # subset the computed RLE data by chromosome从ABrun_all数据框中筛选出当前染色体 i 的RLE数据，并存储在ABrun中
+  ABrun <- subset(ABrun_all, chr == i)
+  # subset the per chromosome data into AB and BA compartments
+  AB_chr <- subset(ABrun, compartment == "AB")
+  BA_chr <- subset(ABrun, compartment == "BA")
+  #分别计算HMEC和BT549数据中A和B区室的百分比
+  # percent of HMEC data that is in an A compartment  ( # of regions assigned as A times resolution divided by total chromosome size )当前染色体 i 中HMEC数据中A区室的百分比
+  AB_summary$HMEC_A[which(AB_summary$chr == i)] <- round(length(AB_conditions_assigned_chr$HMECcompartment[which(AB_conditions_assigned_chr$HMECcompartment == "A")]) * res_number / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # percent of HMEC data that is in an B compartment  ( # of regions assigned as B times resolution divided by total chromosome size )当前染色体 i 中HMEC数据中B区室的百分比
+  AB_summary$HMEC_B[which(AB_summary$chr == i)] <- round(length(AB_conditions_assigned_chr$HMECcompartment[which(AB_conditions_assigned_chr$HMECcompartment == "B")]) * res_number / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # percent of BT549 data that is in an A compartment  ( # of regions assigned as A times resolution divided by total chromosome size )当前染色体 i 中BT549数据中A区室的百分比
+  AB_summary$BT549_A[which(AB_summary$chr == i)] <- round(length(AB_conditions_assigned_chr$BT549compartment[which(AB_conditions_assigned_chr$BT549compartment == "A")]) * res_number / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # percent of BT549 data that is in an B compartment  ( # of regions assigned as B times resolution divided by total chromosome size )当前染色体 i 中BT549数据中B区室的百分比
+  AB_summary$BT549_B[which(AB_summary$chr == i)] <- round(length(AB_conditions_assigned_chr$BT549compartment[which(AB_conditions_assigned_chr$BT549compartment == "B")]) * res_number / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  
+  #计算四种类型的区室变化在染色体长度中的百分比
+  # Percent of chromosome length as one of four switches: AA, BB, AB, BA.  These are summed together in a fifth category of switch type
+  # Percent of chromosome that was A to A compartment compartment  AA类型区室变化在染色体长度中的百分比
+  AB_summary$Percent_AA[which(AB_summary$chr == i)] <- round(sum(AB_conditions_assigned_chr$HMECend[AB_conditions_assigned_chr$compartment == "AA"] - AB_conditions_assigned_chr$HMECstart[AB_conditions_assigned_chr$compartment == "AA"]) / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # Percent of chromosome that was B to B compartment compartment  BB类型区室变化在染色体长度中的百分比
+  AB_summary$Percent_BB[which(AB_summary$chr == i)] <- round(sum(AB_conditions_assigned_chr$HMECend[AB_conditions_assigned_chr$compartment == "BB"] - AB_conditions_assigned_chr$HMECstart[AB_conditions_assigned_chr$compartment == "BB"]) / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # Percent of chromosome that was A to B compartment compartment  AB类型区室变化在染色体长度中的百分比
+  AB_summary$Percent_AB[which(AB_summary$chr == i)] <- round(sum(AB_conditions_assigned_chr$HMECend[AB_conditions_assigned_chr$compartment == "AB"] - AB_conditions_assigned_chr$HMECstart[AB_conditions_assigned_chr$compartment == "AB"]) / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # Percent of chromosome that was B to A compartment compartment  BA类型区室变化在染色体长度中的百分比
+  AB_summary$Percent_BA[which(AB_summary$chr == i)] <- round(sum(AB_conditions_assigned_chr$HMECend[AB_conditions_assigned_chr$compartment == "BA"] - AB_conditions_assigned_chr$HMECstart[AB_conditions_assigned_chr$compartment == "BA"]) / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+   
+   # Total number of bins with AB compartment changes计算了AB区室变化的总数和不同类型区室的总数
+  # Total number of bins staying AA 
+  AB_summary$Number_AA[which(AB_summary$chr == i)] <- sum(AB_conditions_assigned_chr$compartment == "AA")
+  # Total number of bins staying BB 
+  AB_summary$Number_BB[which(AB_summary$chr == i)] <- sum(AB_conditions_assigned_chr$compartment == "BB")
+  # Total number of bins switching AB
+  AB_summary$Number_AB[which(AB_summary$chr == i)] <- sum(AB_conditions_assigned_chr$compartment == "AB")
+  # Total number of bins switching BA
+  AB_summary$Number_BA[which(AB_summary$chr == i)] <- sum(AB_conditions_assigned_chr$compartment == "BA")
+  
+  # add min mean and max run lengths for AB and BA compartment changes for each chromosome计算AB和BA区室变化的最小、平均和最大运行长度，并转换为kb单位
+  # AB min, mean, and max of run lengths. Calculations are divided by 1000 to convert bases to kb.
+  if (nrow(AB_chr) > 0) {
+    AB_summary$ABmin[which(AB_summary$chr == i)] <- round(min(AB_chr$lengths) / res_number, 0)
+    AB_summary$ABmean[which(AB_summary$chr == i)] <- round(mean(AB_chr$lengths) / res_number, 2)
+    AB_summary$ABmax[which(AB_summary$chr == i)] <- round(max(AB_chr$lengths) / res_number, 0)
+  } else {
+    AB_summary$ABmin[which(AB_summary$chr == i)] <- 0
+    AB_summary$ABmean[which(AB_summary$chr == i)] <- 0
+    AB_summary$ABmax[which(AB_summary$chr == i)] <- 0
+  }
+  # BA min, mean, and max of run lengths
+  if (nrow(BA_chr) > 0) {
+    AB_summary$BAmin[which(AB_summary$chr == i)] <- round(min(BA_chr$lengths) / res_number, 0)
+    AB_summary$BAmean[which(AB_summary$chr == i)] <- round(mean(BA_chr$lengths) / res_number, 2)
+    AB_summary$BAmax[which(AB_summary$chr == i)] <- round(max(BA_chr$lengths) / res_number, 0)
+  } else {
+    AB_summary$BAmin[which(AB_summary$chr == i)] <- 0
+    AB_summary$BAmean[which(AB_summary$chr == i)] <- 0
+    AB_summary$BAmax[which(AB_summary$chr == i)] <- 0
+  }
+}
+# Subset and rename columns
+#AB_summary <- AB_summary[, c("chr", "Percent_AA", "Percent_BB", "Percent_AB", "Percent_BA", "Number_AA", "Number_BB", "Number_AB", "Number_BA")]
+# Visualize
+DT::datatable(AB_summary, options = list(pageLength = 22))
+
+write.csv(AB_summary, "100kb_HMEC_vs_BT549_AB_summary.csv", row.names = TRUE)
+```
+
+# KaryoploteR Plots and Per Chromosome AB Compartments and EVs 染色体核型图+AB/EV
+用的还是过滤之后的区室数据
+源代码中x0，x1并没有修改，选的都是start，
+我修改成了x0 start，x1 end
+其实从效果上看基本没有区别，大概是因为坐标区间平移但是区间太小了不明显，只保留原来的一副就行了
+```{r fig.height=4}
+# diagnostic plots of the AB compartments and changes. Each data set EV is plotted and the change in EV and color coded to identify switches
+for (i in chr) {
+  # subset by chromosome
+  AB_conditions_assigned_chr <- subset(AB_conditions_assigned, HMECchr == i)
+  # subset the per chromosome switch types
+  # AB switches
+  chr_ab <- subset(AB_conditions_assigned_chr, compartment == "AB")
+  # BA switches
+  chr_ba <- subset(AB_conditions_assigned_chr, compartment == "BA")
+  # AA switches
+  chr_aa <- subset(AB_conditions_assigned_chr, compartment == "AA")
+  # BB switches
+  chr_bb <- subset(AB_conditions_assigned_chr, compartment == "BB")
+
+  # plot the chromosome
+  kp <- plotKaryotype(chromosomes = i, genome = "hg19", plot.type = 1)
+  # add base numbers to the plot
+  kpAddBaseNumbers(kp)
+
+  # HMEC EV plot
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.0
+  r1 <- 0.35
+  # Add the HMEC EVs segments and scale to the min and max of the EV values，下面的x0和x1要不要改一下，包括BT549！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！源代码没改
+  kpSegments(kp, chr = i, x0 = AB_conditions_assigned_chr$HMECstart, x1 = AB_conditions_assigned_chr$HMECstart, y0 = 0, y1 = AB_conditions_assigned_chr$HMECEV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$HMECEV, na.rm = T), ymin = min(AB_conditions_assigned_chr$HMECEV, na.rm = T))
+  # Add the HMEC EV plot label
+  kpAddLabels(kp, labels = "HMEC", r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.04, cex = 1.0)
+  # Add the axis, scaled for min and max of the HMEC EVs
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$HMECEV, na.rm = T), ymin = min(AB_conditions_assigned_chr$HMECEV, na.rm = T), tick.pos = c(max(AB_conditions_assigned_chr$HMECEV, na.rm = T), 0, min(AB_conditions_assigned_chr$HMECEV, na.rm = T)))
+  # Add A and B labels to the axis
+  kpAddLabels(kp, labels = "B", r0 = r0, r1 = r0 + ((r1 - r0) / 2), cex = 1.0)
+  kpAddLabels(kp, labels = "A", r0 = r0 + ((r1 - r0) / 2), r1 = r1, cex = 1.0)
+
+  # BT549 EV plot
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.4
+  r1 <- 0.75
+  # Add the BT549 EVs segments and scale to the min and max of the EV values
+  kpSegments(kp, chr = i, x0 = AB_conditions_assigned_chr$BT549start, x1 = AB_conditions_assigned_chr$BT549start, y0 = 0, y1 = AB_conditions_assigned_chr$BT549EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$BT549EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$BT549EV, na.rm = T), col = "#666666")
+  # Add the BT549 EV plot label
+  kpAddLabels(kp, labels = "BT549", r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.04, cex = 1.0)
+  # Add the axis, scaled for min and max of the BT549 EVs
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$BT549EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$BT549EV, na.rm = T), tick.pos = c(max(AB_conditions_assigned_chr$BT549EV, na.rm = T), 0, min(AB_conditions_assigned_chr$BT549EV, na.rm = T)))
+  # Add A and B labels to the axis
+  kpAddLabels(kp, labels = "B", r0 = r0, r1 = r0 + ((r1 - r0) / 2), cex = 1.0)
+  kpAddLabels(kp, labels = "A", r0 = r0 + ((r1 - r0) / 2), r1 = r1, cex = 1.0)
+
+  # Delta EV plot,对应BT549 EV VS HMEC EV
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.8
+  r1 <- 1.1
+  # Plot the AA delta EV segments，包括这里的x0和x1！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+  kpSegments(kp, chr = i, x0 = chr_aa$HMECstart, x1 = chr_aa$HMECstart, y0 = 0, y1 = chr_aa$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "gray")
+  # Plot the BB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_bb$HMECstart, x1 = chr_bb$HMECstart, y0 = 0, y1 = chr_bb$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "gray")
+  # Plot the AB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ab$HMECstart, x1 = chr_ab$HMECstart, y0 = 0, y1 = chr_ab$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "blue")
+  # Plot the BA delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ba$HMECstart, x1 = chr_ba$HMECstart, y0 = 0, y1 = chr_ba$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "red")
+  # Add axis labels
+  kpAddLabels(kp, labels = expression(paste(Delta, "EV")), r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.035, cex = 1.0)
+  # Add the axis scaled to the min and max of the delta EV values
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), tick.pos = c(round(max(AB_conditions_assigned_chr$D.EV, na.rm = T), 3), 0, round(min(AB_conditions_assigned_chr$D.EV, na.rm = T), 3)))
+
+  # Add the legend indicating the color of the switches in the delta EV plot
+  legend(x = "top", fill = c("gray", "gray", "blue", "red"), legend = c("AA", "BB", "AB", "BA"), y.intersp = 1, ncol = 4, cex = 1,  inset = c(0, -0.2), xpd = TRUE)
+  
+  #注意在里面一张一张保存图片,无法保存
+  #ggsave(paste0(i, "_100kb_HMEC_vs_BT549_KaryoploteR_x0start_x1start.pdf"), width = 10, height = 7)
+  #100kb_HMEC_vs_BT549_KaryoploteR_x0start_x1start_chr.pdf
+}
+
+
+
+#下面是修改过的x0，x1
+for (i in chr) {
+  # subset by chromosome
+  AB_conditions_assigned_chr <- subset(AB_conditions_assigned, HMECchr == i)
+  # subset the per chromosome switch types
+  # AB switches
+  chr_ab <- subset(AB_conditions_assigned_chr, compartment == "AB")
+  # BA switches
+  chr_ba <- subset(AB_conditions_assigned_chr, compartment == "BA")
+  # AA switches
+  chr_aa <- subset(AB_conditions_assigned_chr, compartment == "AA")
+  # BB switches
+  chr_bb <- subset(AB_conditions_assigned_chr, compartment == "BB")
+
+  # plot the chromosome
+  kp <- plotKaryotype(chromosomes = i, genome = "hg19", plot.type = 1)
+  # add base numbers to the plot
+  kpAddBaseNumbers(kp)
+
+  # HMEC EV plot
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.0
+  r1 <- 0.35
+  # Add the HMEC EVs segments and scale to the min and max of the EV values，下面的x0和x1要不要改一下，包括BT549！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！源代码没改
+  kpSegments(kp, chr = i, x0 = AB_conditions_assigned_chr$HMECstart, x1 = AB_conditions_assigned_chr$HMECend, y0 = 0, y1 = AB_conditions_assigned_chr$HMECEV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$HMECEV, na.rm = T), ymin = min(AB_conditions_assigned_chr$HMECEV, na.rm = T))
+  # Add the HMEC EV plot label
+  kpAddLabels(kp, labels = "HMEC", r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.04, cex = 1.0)
+  # Add the axis, scaled for min and max of the HMEC EVs
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$HMECEV, na.rm = T), ymin = min(AB_conditions_assigned_chr$HMECEV, na.rm = T), tick.pos = c(max(AB_conditions_assigned_chr$HMECEV, na.rm = T), 0, min(AB_conditions_assigned_chr$HMECEV, na.rm = T)))
+  # Add A and B labels to the axis
+  kpAddLabels(kp, labels = "B", r0 = r0, r1 = r0 + ((r1 - r0) / 2), cex = 1.0)
+  kpAddLabels(kp, labels = "A", r0 = r0 + ((r1 - r0) / 2), r1 = r1, cex = 1.0)
+
+  # BT549 EV plot
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.4
+  r1 <- 0.75
+  # Add the BT549 EVs segments and scale to the min and max of the EV values
+  kpSegments(kp, chr = i, x0 = AB_conditions_assigned_chr$BT549start, x1 = AB_conditions_assigned_chr$BT549end, y0 = 0, y1 = AB_conditions_assigned_chr$BT549EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$BT549EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$BT549EV, na.rm = T), col = "#666666")
+  # Add the BT549 EV plot label
+  kpAddLabels(kp, labels = "BT549", r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.04, cex = 1.0)
+  # Add the axis, scaled for min and max of the BT549 EVs
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$BT549EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$BT549EV, na.rm = T), tick.pos = c(max(AB_conditions_assigned_chr$BT549EV, na.rm = T), 0, min(AB_conditions_assigned_chr$BT549EV, na.rm = T)))
+  # Add A and B labels to the axis
+  kpAddLabels(kp, labels = "B", r0 = r0, r1 = r0 + ((r1 - r0) / 2), cex = 1.0)
+  kpAddLabels(kp, labels = "A", r0 = r0 + ((r1 - r0) / 2), r1 = r1, cex = 1.0)
+
+  # Delta EV plot,对应BT549 EV VS HMEC EV
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.8
+  r1 <- 1.1
+  # Plot the AA delta EV segments，包括这里的x0和x1！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+  kpSegments(kp, chr = i, x0 = chr_aa$HMECstart, x1 = chr_aa$HMECend, y0 = 0, y1 = chr_aa$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "gray")
+  # Plot the BB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_bb$HMECstart, x1 = chr_bb$HMECend, y0 = 0, y1 = chr_bb$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "gray")
+  # Plot the AB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ab$HMECstart, x1 = chr_ab$HMECend, y0 = 0, y1 = chr_ab$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "blue")
+  # Plot the BA delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ba$HMECstart, x1 = chr_ba$HMECend, y0 = 0, y1 = chr_ba$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "red")
+  # Add axis labels
+  kpAddLabels(kp, labels = expression(paste(Delta, "EV")), r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.035, cex = 1.0)
+  # Add the axis scaled to the min and max of the delta EV values
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), tick.pos = c(round(max(AB_conditions_assigned_chr$D.EV, na.rm = T), 3), 0, round(min(AB_conditions_assigned_chr$D.EV, na.rm = T), 3)))
+
+  # Add the legend indicating the color of the switches in the delta EV plot
+  legend(x = "top", fill = c("gray", "gray", "blue", "red"), legend = c("AA", "BB", "AB", "BA"), y.intersp = 1, ncol = 4, cex = 1,  inset = c(0, -0.2), xpd = TRUE)
+  
+  #ggsave(paste0(i, "_100kb_HMEC_vs_BT549_KaryoploteR_x0start_x1end.pdf"), width = 10, height = 7)
+}
+```
+
+```{r eval=FALSE}
+# Similar to plots in the above code chunk, but plots only the per chromosome change in EVs and groups AA and BB changes into one color. Easier to see regions that contain AB or BA switches
+#同样道理，只有EV一条轨道，start和end效果上没有区别，还是保存了start+end，文件名是start+start，没影响 
+
+for (i in chr) {
+  # subset by chromosome
+  AB_conditions_assigned_chr <- subset(AB_conditions_assigned, HMECchr == i)
+  # subset the per chromosome switch types
+  # AB switches
+  chr_ab <- subset(AB_conditions_assigned_chr, compartment == "AB")
+  # BA switches
+  chr_ba <- subset(AB_conditions_assigned_chr, compartment == "BA")
+  # AA switches
+  chr_aa <- subset(AB_conditions_assigned_chr, compartment == "AA")
+  # BB switches
+  chr_bb <- subset(AB_conditions_assigned_chr, compartment == "BB")
+
+  # plot each chromosome
+  kp <- plotKaryotype(chromosomes = i, genome = "hg19", plot.type = 1)
+  # add base numbers
+  kpAddBaseNumbers(kp)
+  # Delta EV plot (BT549 EV minus HMEC EV)
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.4
+  r1 <- 0.75
+  # Plot the AA delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_aa$HMECstart, x1 = chr_aa$HMECend, y0 = 0, y1 = chr_aa$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "#666666")
+  # Plot the BB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_bb$HMECstart, x1 = chr_bb$HMECend, y0 = 0, y1 = chr_bb$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "#666666")
+  # Plot the AB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ab$HMECstart, x1 = chr_ab$HMECend, y0 = 0, y1 = chr_ab$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "blue")
+  # Plot the BA delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ba$HMECstart, x1 = chr_ba$HMECend, y0 = 0, y1 = chr_ba$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "red")
+  # Add axis labels
+  kpAddLabels(kp, labels = expression(paste(Delta, "EV")), r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.035, cex = 1.0)
+  # Add the axis scaled to the min and max of the delta EV values
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), tick.pos = c(round(max(AB_conditions_assigned_chr$D.EV, na.rm = T), 3), 0, round(min(AB_conditions_assigned_chr$D.EV, na.rm = T), 3)))
+  # Add the legend indicating the color of the switches in the delta EV plot
+  legend(x = "top", fill = c("#666666", "blue", "red"), legend = c("AA and BB", "AB", "BA"), y.intersp = 0.7, ncol = 3, cex = 0.95)
+}
+
+```
+
+# Bar charts
+Summary of bar charts for each dataset and differences between datasets on a per chromosomal basis. 
+用的是AB_summary，所以还是padj过滤之后的区室数据框
+每条chr上HMEC AB区室占据chr全长比例
+         BT549同理
+第三张图sum就是区室转换区域占据chr全长比例
+所以我比对源码修改了标题以及pdf文件名字
+HMEC AB Compartment By Chromosome——》100kb_HMEC_vs_BT549_HMEC_AB_ratio_per_chr_
+第三个没改：AB Compartment switches By Chromosome——》100kb_HMEC_vs_BT549_AB_switches_per_chr_
+```{r fig.height=4}
+# generates summary bar charts for each data set and the differences between datasets on a per chromosomal basis.
+# Note: some regions have NA for EV so the total doesn't always sum to 100%
+# !Need to summarize across all chromosomes once chr23 EVs are computed.
+
+# HMEC summary stacked bar plots
+# subset the summary file for just the HMEC relevant data
+#堆叠柱状图，展示每个染色体中 A 区域和 B 区域的百分比
+HMEC_summary <- AB_summary[, c("chr", "HMEC_A", "HMEC_B")]
+# reformat the data to the preferred long format for the stacked bar plots. Also remove "chr" from chromosome names 使用mutate函数将"chr"列转换为因子变量，并使用gather函数将数据从宽格式转换为长格式，存储在HMEC_summary（或BT549_summary）中。这将数据从每个染色体的"HMEC_A"和"HMEC_B"列转换为三列："chr"、"variable"（对应"A"或"B"区域）、"value"（对应百分比）
+HMEC_summary <- HMEC_summary %>%
+  mutate(chr = factor(row_number())) %>%
+  gather(variable, value, -chr)
+# Order chromosomes 使用aggregate函数对HMEC_summary（或BT549_summary）按照"chr"列的值进行分组求和，以得到每个染色体的总和。然后按照总和值对染色体进行排序，并将排序后的染色体顺序应用到数据中，确保在绘图时染色体按照总和值的大小顺序排列
+chr_summary <- aggregate(HMEC_summary$value, by = list(HMEC_summary$chr), sum)
+HMEC_summary$chr <- factor(HMEC_summary$chr, levels = chr_summary$Group.1[order(chr_summary$x, decreasing = TRUE)])
+# define the plot parameters
+HMECsum.plot <- ggplot(HMEC_summary, aes(
+  x = chr, y = value,
+  fill = factor(variable, levels = c("HMEC_B", "HMEC_A"))
+)) +
+  geom_bar(stat = "identity")
+# plot the stacked bar plots
+HMECsum.plot + scale_fill_brewer(palette = "Spectral") + xlab("Chromosome") + ylab("Percent Compartment ID") + ggtitle("HMEC AB Compartments By Chromosome") + guides(fill = guide_legend(title = "ID Type"))
+ggsave(paste0("100kb_HMEC_vs_BT549_HMEC_AB_ratio_per_chr_", padj_compartment_cutoff, ".pdf"), width = 7, height = 7)
+
+
+# BT549 summary stacked bar plots,同上
+# subset the summary file for just the BT549 relevant data
+BT549_summary <- AB_summary[, c("chr", "BT549_A", "BT549_B")]
+# reformat the data to the preferred long format for the stacked bar plots. Also remove "chr" from chromosome names
+BT549_summary <- BT549_summary %>%
+  mutate(chr = factor(row_number())) %>%
+  gather(variable, value, -chr)
+# Order chromosomes
+chr_summary <- aggregate(BT549_summary$value, by = list(BT549_summary$chr), sum)
+BT549_summary$chr <- factor(BT549_summary$chr, levels = chr_summary$Group.1[order(chr_summary$x, decreasing = TRUE)])
+# define the plot parameters
+BT549sum.plot <- ggplot(BT549_summary, aes(
+  x = chr, y = value,
+  fill = factor(variable, levels = c("BT549_B", "BT549_A"))
+)) +
+  geom_bar(stat = "identity")
+# plot the stacked bar plots
+BT549sum.plot + scale_fill_brewer(palette = "Spectral") + xlab("Chromosome") + ylab("Percent Compartment ID") + ggtitle("BT549 AB Compartments By Chromosome") + guides(fill = guide_legend(title = "ID Type"))
+ggsave(paste0("100kb_HMEC_vs_BT549_BT549_AB_ratio_per_chr_", padj_compartment_cutoff, ".pdf"), width = 7, height = 7)
+
+
+# compartment switches summary stacked bar plots including percent of regions that switched.
+conditions_summary <- AB_summary[, c("chr", "Percent_AA", "Percent_BB", "Percent_AB", "Percent_BA")]
+# reformat the data to the preferred long format for the stacked bar plots. Also remove "chr" from chromosome names
+conditions_summary <- conditions_summary %>%
+  mutate(chr = factor(row_number())) %>%
+  gather(variable, value, -chr)
+# Sort by largest-to-smallest switches
+# Proportions for any switch, to order chromosomes如果AB_BA为FALSE，则使用全部AB变化；否则，只使用AB和BA变化来计算显著结果，采用后者
+if (!AB_BA) {
+  # Use total AB changes for the genome-wide results
+  conditions_summary_AB_BA <- conditions_summary
+} else {
+  # Use only AB and BA changes for significant results
+  conditions_summary_AB_BA <- conditions_summary[conditions_summary$variable %in% c("Percent_AB", "Percent_BA"), ]
+}
+# Sum them up for any type of switch
+conditions_summary_AB_BA <- aggregate(conditions_summary_AB_BA$value, by = list(conditions_summary_AB_BA$chr), FUN = sum)
+colnames(conditions_summary_AB_BA) <- c("chr", "percent")
+# Order chromosomes
+conditions_summary$chr <- factor(conditions_summary$chr, levels = conditions_summary_AB_BA$chr[order(conditions_summary_AB_BA$percent, decreasing = TRUE)])
+# define the plot parameters
+conditions_AB <- ggplot(conditions_summary, aes(
+  x = chr, y = value,
+  fill = factor(variable, levels = c("Percent_BA", "Percent_AB", "Percent_BB", "Percent_AA"))
+)) +
+  geom_bar(stat = "identity")
+# plot the stacked bar plots
+conditions_AB + scale_fill_brewer(palette = "Spectral") + xlab("Chromosome") + ylab("Percent Compartment ID") + ggtitle("AB Compartment switches By Chromosome") + guides(fill = guide_legend(title = "ID Type"))
+ggsave(paste0("100kb_HMEC_vs_BT549_AB_switches_per_chr_", padj_compartment_cutoff, ".pdf"), width = 7, height = 7)
+
+```
+
+```{r fig.height=6}
+#' Plot the proportion of a selected AB compartment change, 用的是AB_summary，所以还是过滤之后的，我命名成100kb_HMEC_vs_BT549_4switchs_per_chr_，就是4种类型的switch占据chr的比例
+#' chromosomes sorted from larger to smaller fraction
+#' @param conditions conditions to visualize. Any combination of "Percent_AA", "Percent_BB", "Percent_AB", "Percent_BA"
+#' @param cols colors. Should be the same number as conditions
+plot_condition <- function(conditions = c("Percent_AA"), cols = "#99D594") {
+  # Select data
+  conditions_summary <- AB_summary[, c("chr", conditions)]
+  # Reformat into long form
+  condition_summary_long <- melt(conditions_summary, id = "chr")
+  condition_summary_long$chr <- factor(condition_summary_long$chr, levels = conditions_summary$chr[order(conditions_summary %>% dplyr::select(starts_with("Percent")) %>% apply(., 1, sum), decreasing = FALSE)])
+  # display.brewer.pal(7, "Spectral")
+  # brewer.pal(7, "Spectral")
+  p <- ggplot(condition_summary_long, aes(x = chr, y = value, fill = factor(variable))) +
+    geom_bar(stat = "identity") +
+    theme_bw() +
+    scale_fill_manual(values = cols) + 
+    ylab("Percent of the chromosome length") +
+    coord_flip()
+  p
+}
+#定义了一个名为 plot_condition 的函数，用于绘制染色体上特定 AB 区域变化的百分比。函数接受两个参数：conditions 和 cols。
+#conditions 参数是一个字符向量，用于指定要可视化的条件，可以是 "Percent_AA"、"Percent_BB"、"Percent_AB" 或 "Percent_BA" 中的任意组合。cols 参数是一个字符向量，用于指定绘图所用的颜色。
+#函数首先从 AB_summary 数据框中选择染色体和指定的条件列，并将其转换为长格式。然后，它对染色体进行排序，以便按照染色体的大小排列。最后，它使用 ggplot2 包绘制了堆叠柱状图，其中 x 轴表示染色体，y 轴表示百分比，fill 参数表示区域的标识（A 或 B）
+#下面就是这个函数具体的参数输入应用
+plot_AA <- plot_condition(conditions = c("Percent_AA"), cols = "#99D594")
+plot_BB <- plot_condition(conditions = c("Percent_BB"), cols = "#FC8D59")
+plot_AB <- plot_condition(conditions = c("Percent_AB"), cols = "#FEE08B")
+plot_BA <- plot_condition(conditions = c("Percent_BA"), cols = "#D53E4F")
+
+p<-grid.arrange(plot_AA, plot_BB, plot_AB, plot_BA, ncol = 2)
+#上面绘制的就是AA,AB,BA,BB等转换区域分别对应各自chr的比例,HMEC vs BT549显著的区室转换中各种区室转换占据chr全长的比例
+ggsave(paste0("100kb_HMEC_vs_BT549_4switchs_per_chr_", padj_compartment_cutoff, ".pdf"),p, width = 10, height = 7)
+```
+
+```{r fig.height=3.5, fig.width=5}
+# All conditions 这里实际上就是上一个代码块的整合4图,效果和690左右的AB Compartment switches By Chromosome没有什么区别
+plot_all <- plot_condition(conditions = c("Percent_AA", "Percent_BB", "Percent_AB", "Percent_BA"), cols = c("#99D594", "#FC8D59", "#FEE08B", "#D53E4F"))
+plot_all
+ggsave(paste0("100kb_HMEC_vs_BT549_4switchs_all_per_chr_", padj_compartment_cutoff, ".pdf"), width = 7, height = 7)
+```
+
+# Piecharts of compartment switches 
+区室转换饼图+EV区室转换过程分布，用的都是padj过滤之后的数据
+
+```{r fig.height=6}
+# Get the number of compartments for each switch 生成饼图，展示不同切换类型（AA, AB, BB, BA）在数据集中所占比例的百分比，所以用的是bin，和当初自己使用homer绘制效果差不多
+sum_AA <- sum(AB_summary$Number_AA)
+sum_AB <- sum(AB_summary$Number_AB)
+sum_BB <- sum(AB_summary$Number_BB)
+sum_BA <- sum(AB_summary$Number_BA)
+slices <- c(sum_AA, sum_BB, sum_AB, sum_BA)
+
+# transform the counts to percentages for the legend 
+pct <- round(slices/sum(slices)*100, digits = 2)
+lbls <- c("Percent_AA", "Percent_BB", "Percent_AB", "Percent_BA")
+lbls <- paste(lbls, pct) # add percents to labels 
+lbls <- paste(lbls,"%",sep="") # add % to labels
+
+pie(slices,labels = lbls, col=rainbow(length(lbls)), init.angle = 70,
+   main="Compartment changes in HMEC & BT549 conditions, excluding non-changed regions")
+#ggsave(paste0("100kb_HMEC_vs_BT549_compartment_changes_pie_", padj_compartment_cutoff, ".pdf"), width = 4.5, height = 4.5)
+ ```
+
+# Eigenvector distribution per compartment change这里就是对EV值，也就是前面使用的区室score进行了一个分布查看小提琴图，可以考虑使用
+
+```{r}
+aggregated_ev <- data.frame(Condition = c(rep("HMEC", nrow(AB_conditions_assigned)), rep("BT549", nrow(AB_conditions_assigned))),
+                            EV = c(AB_conditions_assigned$HMECEV, AB_conditions_assigned$BT549EV),
+                            Switch = c(AB_conditions_assigned$compartment, AB_conditions_assigned$compartment))
+
+ggplot(aggregated_ev, aes(x=Switch, y=EV, fill=Condition)) +
+  geom_violin(position=position_dodge(1)) +
+  geom_boxplot(width=0.1, position=position_dodge(1))
+ggsave(paste0("100kb_HMEC_vs_BT549_Eigenvector_distribution_", padj_compartment_cutoff, ".pdf"),height = 7,width = 10)
+
+
+
+#考虑用其他画,但是呈现不出分组的效果
+#ggbetweenstats(data=aggregated_ev,
+#                x=Switch,
+#                y=EV,
+#               results.subtitle = FALSE,
+#              pairwise.display="all",
+#                title = "Eigenvector distribution per compartment across HMEC vs TNBC")
+#ggsave("100kb_HMEC_vs_TNBC_compartment_strength_Distribution.pdf", width = 7, height = 7)
+
+#grouped_ggbetweenstats(data=aggregated_ev,
+#                x=Switch,
+#               y=EV,
+#                grouping.var =Condition)
+
+```
+
+# Genes and Gene Enrichments
+
+## Obtain the ranked genes to be used in GSEA
+
+Function obtained from `05_AB_eigenvector.Rmd`,略
+这个函数可以用于之后loop以及TAD层面上，寻找与结构区域变异切换范围的overlap即靶基因
+！！！！！！！！！！！！！！！！！！！！！！！！！！
+最终获得数据
+genes_XX类型_ranked使用的是padj过滤之后的靶基因数据
+genes_all_ranked使用的是没有padj过滤的靶基因数据
+```{r}
+# function to Find genes in AB or BA regions by detecting overlap between those regions and gene TSS sites in hg19 from above 区室切换与gene相互联系，实质上就是寻找区室切换的靶基因，寻找的是区室切换区域重叠的转录起始位点TSS
+
+#定义了一个函数
+#detect_genes_ranked 函数旨在通过检测AB或BA区域与hg19参考基因组中基因TSS位点之间的重叠来查找AB或BA区域中的基因。此函数接受一个包含区室切换范围的数据集 (rle_dataset)，并执行以下步骤：
+#将区室切换范围转换为 GRanges 对象。
+#检测与 hg19 参考基因的重叠。
+#提取重叠作为基因符号。
+#结合基因符号和区域。
+#使用 org.Hs.eg.db 数据库中的 bitr 函数获取基因名称。
+#按最大绝对特征向量差异进行聚合。
+#添加基因描述和生物类型。
+#重新排列列。
+#按最大到最小差异对基因进行排序。
+#返回数据集。
+detect_genes_ranked <- function(rle_dataset) {
+  # convert the compartment switch ranges to GRanges object，操作的对象就是AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "AA", ]等
+  rle_dataset.gr <- makeGRangesFromDataFrame(rle_dataset, seqnames.field = "chr", start.field = "start", end.field = "end", keep.extra.columns = TRUE)
+  # detect overlaps with hg19 reference genes,02脚本中因为symbol会重名，所以不建议使用这个，问题应该是出在genomewide.genes上！！！！！！！！！！！
+  rle_dataset_gene_olap <- findOverlaps(rle_dataset.gr, genomewide.genes)
+  # extract the overlaps as gene symbols，gene名称之类
+  rle_dataset_genes <- rle_dataset_gene_olap %>%
+    as.data.frame() %>%
+    # group_by(queryHits) %>%
+    mutate(genes = genomewide.genes$gene_id[subjectHits]) %>%
+    dplyr::select(queryHits, genes) %>%
+    distinct()
+  # temporary data frame containing the region data，gene坐标信息之类
+  tmpAB <- rle_dataset %>%
+    dplyr::select(chr, start, end, D.EV, switch) %>%
+    mutate(id = 1:nrow(rle_dataset))
+  # combine gene symbols and regions
+  rle_dataset_genes <- left_join(rle_dataset_genes, tmpAB, by = c("queryHits" = "id"))
+  # Get gene names
+  gene_symbols <- bitr(rle_dataset_genes$genes, fromType = "ENTREZID", toType = "SYMBOL", OrgDb = OrgDb)  #!!!!!!!
+  rle_dataset_genes <- left_join(rle_dataset_genes, gene_symbols, by = c("genes" = "ENTREZID"))
+  # Aggregate by maximum absolute Eigenvector difference
+  rle_dataset_genes <- aggregate(D.EV ~ SYMBOL, rle_dataset_genes, max)
+  # Append description
+  rle_dataset_genes <- left_join(rle_dataset_genes, gene_annotations, by = c("SYMBOL" = "symbol"))  
+  
+  #此处gene_annotations可以使用ensgene！！！！！！！！！！！！！
+  #另外一个就是rle_dataset_genes，需要使用两个对象——rle_dataset_genes和gene_symbols，gene_symbols可以使用bitr转换到ens，即"ENSEMBL"——rle_dataset_genes
+  
+  # rearrange the columns
+  rle_dataset_genes <- rle_dataset_genes[, c("SYMBOL", "D.EV", "description", "biotype")]
+  colnames(rle_dataset_genes)[1] <- "genes" # Rename the first column
+  # Order by largest to smallest difference
+  rle_dataset_genes <- rle_dataset_genes[order(rle_dataset_genes$D.EV, decreasing = TRUE), ]
+  # Return the dataset
+  rle_dataset_genes 
+}
+
+AB_conditions_assigned_subset <- AB_conditions_assigned[, c("HMECchr", "HMECstart", "BT549end", "D.EV", "compartment")]
+colnames(AB_conditions_assigned_subset) <- c("chr", "start", "end", "D.EV", "switch")
+
+#注意，实际上这里已经返回了对应区室切换类型的gene
+genes_AA_ranked <- detect_genes_ranked(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "AA", ])
+genes_BB_ranked <- detect_genes_ranked(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "BB", ])
+genes_AB_ranked <- detect_genes_ranked(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "AB", ])
+genes_BA_ranked <- detect_genes_ranked(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "BA", ])
+
+# All regions
+AB_conditions_assigned_all_subset <- AB_conditions_assigned_all[, c("HMECchr", "HMECstart", "BT549end", "D.EV", "compartment")]
+colnames(AB_conditions_assigned_all_subset) <- c("chr", "start", "end", "D.EV", "switch")
+
+genes_all_ranked <- detect_genes_ranked(AB_conditions_assigned_all_subset)
+```
+
+
+## Oncogene annotations
+癌基因的注释，主要是外部的数据
+#https://github.com/mdozmorov/Cancer_notes/blob/master/README.md对照文档仔细分析
+最终gene结果文件和上面无区别，只不过加了4个gene来源list的注释
+```{r}
+# Add onco annotations to the gene lists
+# Import PCAWG_C, PCAWG_N, COSMIC oncogene annotation lists将肿瘤基因注释添加到基因列表中。它导入了四个不同来源的肿瘤基因注释列表
+#https://github.com/mdozmorov/Cancer_notes/blob/master/README.md 这里有对应解释的各种gene数据的来源，总之都是收集来的cancer gene注释
+PCAWG_C <- read.table(file = "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/PCAWG_2020_PID_C_87_genes.txt", header = FALSE)
+PCAWG_N <- read.table(file = "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/PCAWG_2020_PID_N_93_genes.txt", header = FALSE)
+##The Pan-Cancer Analysis of Whole Genomes (PCAWG) study，全基因组泛癌症分析(PCAWG)研究是一项国际合作，旨在识别来自国际癌症基因组联盟的2600多个癌症全基因组的共同突变模式
+#来自 PCAWG 项目的肿瘤基因列表（Cohort）
+#来自 PCAWG 项目的肿瘤基因列表（Normal）
+
+COSMIC <- read.table(file = "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/COSMIC_genes.txt", header = FALSE)
+#Cancer Gene Census (CGC), download COSMIC
+BushmanLab <- read.table(file = "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/allOnco_May2018.tsv")
+#Cancer Gene Census (CGC), download COSMIC
+
+# function add the annotations to gene lists
+#标记数据集中的基因是否在这些列表中。然后，它将这些逻辑向量添加到数据集中作为新的列，并返回修改后的数据集
+#了解清楚这些gene list很重要
+add_onco <- function(dataset) {
+  # DEGs detected in COSMIC
+  degs_cosmic <- ifelse(dataset$genes %in% intersect(dataset$genes, COSMIC$V1), "Yes", "")
+  degs_bushman <- ifelse(dataset$genes %in% intersect(dataset$genes, BushmanLab$V1), "Yes", "")
+  # DEGs detected in PID-C set
+  degs_PID_C <- ifelse(dataset$genes %in% intersect(dataset$genes, PCAWG_C$V1), "Yes", "")
+  # DEGs detected in PID-N set
+  degs_PID_N <- ifelse(dataset$genes %in% intersect(dataset$genes, PCAWG_N$V1), "Yes", "")
+
+  # Attach these annotations
+  dataset <- data.frame(dataset, COSMIC = degs_cosmic, BushmanLab = degs_bushman, PID_C = degs_PID_C, PID_D = degs_PID_N)
+  # dataset <- dplyr::arrange(dataset, desc(COSMIC), desc(BushmanLab), desc(PID_C), desc(PID_D))
+}
+# add the gene lists 所以是区室转换中的gene+来自gene list 4个来源限制的gene注释
+genes_AA_ranked <- add_onco(genes_AA_ranked)
+genes_BB_ranked <- add_onco(genes_BB_ranked)
+genes_AB_ranked <- add_onco(genes_AB_ranked)
+genes_BA_ranked <- add_onco(genes_BA_ranked)
+
+genes_all_ranked <- add_onco(genes_all_ranked)
+```
+
+# Save the data
+
+Save the gene lists with differential eigenvector values sorted, will be used in GSEA analysis 
+要注意，最后保存的这一个文件，是一个多sheet的表格文件！！！！！！！！！！
+每一个sheet都是结果!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+```{r}
+# Write out AB and BA gene/compartment data to Xcel spreadsheets
+#文件在script6/HMEC_vs_BT549_100kb_dchic/DifferentialResult/results/中，就是AB_gene_summary的xlsx表格文件
+if (rerun) {
+  x <- c(list(GenesAA = genes_AA_ranked), list(GenesBB = genes_BB_ranked), list(GenesAB = genes_AB_ranked), list(GenesBA = genes_BA_ranked), list(GenesAll = genes_all_ranked), list(Summary = AB_summary), list(EVs_and_Compartments = AB_conditions_assigned), list(RLE = ABrun_all))
+  write_xlsx(x, path = fileNameOut1)
+}
+
+#genes_AA_ranked，363行
+#genes_BB_ranked，443行
+#genes_AB_ranked，1499行
+#genes_BA_ranked，840行
+#genes_all_ranked，22858行
+#AB_conditions_assigned，4188行
+#AB_conditions_assigned_all，28466行
+
+```
+
+
+# Save BED files
+
+The following format will use colors, https://www.biostars.org/p/269367/
+
+```
+track itemRgb=On								
+chr1	1000	2000	AB	0	.	1000	2000	167,203,104
+chr1	1500	2500	BB	0	.	1000	2000	242,51,16
+```
+
+- "chr", "start", "end" - coordinates
+- "compartment" - type of AB compartment change
+- "padj - difference in compartments
+- "." - strand 正负链
+- "thickStart" and "thickEnd" 
+- RGB colors
+    - AA - red, 255,0,0
+    - AB - orange, 255,165,0
+    - BA - light purple, 158,121,240
+    - BB - blue, 0,0,255
+这里保存的也是过滤之后的区室数据，主要是坐标之类的数据，使用的是padj矫正之后的AB_conditions_assigned数据
+要注意下面的score是padj的负对数，所以是越显著就是值越大
+另外需要注意的就是start以及end对应的是HMEC的数据，然后之后的thick之类的start以及end之类的数据对应的就是BT549的数据
+要注意下面保存的文件就是
+"/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/HMEC_vs_BT549_100kb_dchic/DifferentialResult/results/AB_100kb_0.1.bed"
+对照文件之后就会发现里面对应的就是区室的坐标信息之类的数据
+
+```{r}
+x <- data.frame(chr        = AB_conditions_assigned$HMECchr,
+                start      = AB_conditions_assigned$HMECstart,
+                end        = AB_conditions_assigned$HMECend,
+                name       = AB_conditions_assigned$compartment,
+                score      = -log10(AB_conditions_assigned$padj),
+                strand     = ".",
+                thickStart = AB_conditions_assigned$BT549start,
+                thickEnd   = AB_conditions_assigned$BT549end,
+                color = ifelse(AB_conditions_assigned$compartment == "AA", "255,0,0",
+                               ifelse(AB_conditions_assigned$compartment == "AB", "255,165,0",
+                                      ifelse(AB_conditions_assigned$compartment == "BA", "158,121,240",
+                                             ifelse(AB_conditions_assigned$compartment == "BB", "0,0,255", ""))))
+)
+# Keep full numbers
+x$start <- format(x$start, scientific = FALSE, trim = TRUE, justify = "none")
+x$end   <- format(x$end, scientific = FALSE, trim = TRUE, justify = "none")
+x$thickStart <- format(x$thickStart, scientific = FALSE, trim = TRUE, justify = "none")
+x$thickEnd   <- format(x$thickEnd, scientific = FALSE, trim = TRUE, justify = "none")
+# Append header
+x <- rbind(c("track itemRgb=On", rep("", ncol(x) - 1)), x)
+# Save the BED file
+if (rerun) {
+  fwrite(round_df(x), file = fileNameOut2, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+}
+```
+
+## Summary and EV file
+下面算是一个对于之前代码处理过程中的所有文件中的数据以及变量的一个解释
+！！！！！！！！！！！！！！！！仔细对照
+
+**Summary:** Summary of per chromosome statistics. "chr"- chromosome number. 
+"PT_A" - Percent of chromosome in A compartment in primary tumor dataset.
+"PT_B" - Percent of chromosome in A compartment in primary tumor dataset. 
+原发肿瘤数据集中 A 组分的百分比 ("PT_A") 和 B 组分的百分比 ("PT_B")，实际上对应的就是HMEC
+
+"CR_A" - Percent of chromosome in A compartment in CR dataset. 
+"CR_B" - Percent of chromosome in A compartment in CR dataset. 
+化疗反应数据集中 A 组分的百分比 ("CR_A") 和 B 组分的百分比 ("CR_B"),实际上对应的就是TNBC
+
+
+"Percent_AA", "Percent_BB", "Percent_AB", and "Percent_BA" - percent of each chromosome that is in one of the four compartment switches between the two datasets. 
+每个染色体中属于四种区室切换类型的百分比,注意是切换区室占据chr的比例
+
+"AB_min", "AB_mean", "AB_max" - Min mean and max length of AB compartment per chromosome.
+每个染色体中 AB 区室的最小、平均和最大长度，注意是切换中的区室
+
+"BA_min", "BA_mean", "BA_max" - Min mean and max length of BA compartment per chromosome. 
+表示每个染色体中 BA 区室的最小、平均和最大长度，注意是去切换中的区室
+
+
+
+**EVs_and_Compartments** A summary of regions on each chromosome and their associated EV and compartment. For both PR and CR datasets. 注意是对应HMEC以及TNBC
+
+包含了每个染色体上区域的摘要信息，包括PR和CR数据集中的染色体 ("PRchr" 和 "CRchr")、区域的起始坐标 ("PRstart"、"PRend"、"CRstart" 和 "CRend")
+区域的EV值 ("PREV" 和 "CREV")、区域分配的区室 ("compartment")、EV值差异 ("D.EV") 和区室切换类型 ("switch")
+"PRchr" - chromosome in PR data. 
+"PRstart" - start coordinates of the region in PR dataset.
+"PRend" end coordinate of the region in the PR data. 
+"PREV" EV for the region in PR data. 
+"compartment" Either A or B, the assigned compartment for the region. 
+"CRchr" - chromosome in CR data.
+"CRstart" - start coordinates of the region in CR dataset.
+"CRend" end coordinate of the region in the CR data. 
+"CREV" EV for the region in CR data. 
+"compartment" Either A or B, the assigned compartment for the region. 
+"D.EV" the difference in the EV between datasets. Determined by CREV - PREV. 
+"switch" whether the region switched from A to A (AA), A to B (AB), A to A (AA), or B to B (BB).
+
+**RLE** - Summarizes the run length of regions and their associated switches.
+RLE (Run Length Encoding，运行长度编码)，摘要了区域的运行长度和与之关联的区室切换信息
+"lengths" - length of the run.  表示区域的长度
+"comparment" what compartment the region belongs to.表示区域所属的区室类型
+"start" start coordinate of the region.
+"end" coordinate of the region. 表示区域的起始和结束坐标
+"chr" chromosome that the region belongs to.  区域所属的染色体
+
+
+
+
+#前面保存的数据AB_gene_summary_100kb_0.1.xlsx，其中含有8个sheet，前面5个sheet所含有的gene id都是symbol的id   ，主要是对应symbol的gene id的统计信息，bed文件倒是没有gene id的信息，
+下面是使用ensemble的gene id转换之后的数据的统计信息
+！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+
+修改之后的使用ensemble的id的overlap函数，效果就看genes_BA_ranked中的id列
+detect_genes_ranked_ens 
+现在修改之后的genes实际上是ensemble的gene id
+
+
+#在进行修改之前还是要注意晚上一下gene的背景注释文件
+```{r}
+#对照原来的样本，新增了ensgene,symbol可以保留也可以不保留
+gene_annotations_ens <- grch37[!(grepl("_", grch37$chr) | grepl("GL", grch37$chr)), c("ensgene","symbol", "description", "biotype")]
+gene_annotations_ens <- gene_annotations_ens[!duplicated(gene_annotations_ens$ensgene) & !is.na(gene_annotations_ens$ensgene) & gene_annotations_ens$description != "", ]
+
+bsgenome <- "BSgenome.Hsapiens.UCSC.hg19"
+chrom.sizes <- data.frame(chr = chr, size = seqlengths(getBSgenome(genome = bsgenome, masked = FALSE))[chr])
+
+# Get all human genes
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+genomewide.genes_ens <- genes(TxDb.Hsapiens.UCSC.hg19.knownGene)
+genomewide.genes_ens <- keepSeqlevels(genomewide.genes_ens, c(paste0("chr", 1:22), "chrX"), pruning.mode = "tidy")
+gene_symbol_ens <- bitr(genomewide.genes_ens$gene_id, fromType = "ENTREZID", toType = "ENSEMBL", OrgDb = OrgDb)
+#ENTREZID  ENSEMBL gene_symbol_ens
+#ensgene symbol  gene_annotations_ens
+gene_symbol_ens <- left_join(gene_symbol_ens, gene_annotations_ens, by = c("ENSEMBL" = "ensgene"))
+#ENTREZID ENSEMBL symbol   gene_symbol_ens 
+#gene_id   genomewide.genes_ens
+gene_symbol_entrez_ens <- left_join(data.frame(gene_id = genomewide.genes_ens$gene_id), gene_symbol_ens, by = c("gene_id" = "ENTREZID"))
+#gene_id ENSEMBL symbol    gene_symbol_entrez_ens
+
+
+#gene_id   genomewide.genes_ens
+##gene_id ENSEMBL symbol    gene_symbol_entrez_ens
+#这里因为有些gene转换之间有损失，所以对应的赋值不能直接进行，只能依据gene id值之间的对应关系转换,同理后面的转换也是一样
+#genomewide.genes_ens$ensgene <- gene_symbol_entrez_ens$ENSEMBL  
+genomewide.genes_ens$ensgene <- gene_symbol_entrez_ens[genomewide.genes_ens$gene_id,"ENSEMBL"]
+genomewide.genes_ens$symbol <- gene_symbol_entrez_ens[genomewide.genes_ens$gene_id,"symbol"]
+genomewide.genes_ens$description <- gene_symbol_entrez_ens[genomewide.genes_ens$gene_id,"description"]     
+genomewide.genes_ens$biotype <- gene_symbol_entrez_ens[genomewide.genes_ens$gene_id,"biotype"] 
+
+#综上
+##ensgene symbol——gene_annotations_ens，平替gene_annotations
+##gene_id ensgene symbol  description——genomewide.genes_ens，平替genomewide.genes
+```
+
+
+算了，还是不试了，无论上面的注释有没有执行，最后获得的表格都是一样的，所以上面改动的还是不够（下面改动使用的是将上面注释之后再改动ens的，下面使用的注释等数据都使用上面更新的注释更替，但是还是不行，说明整个逻辑都有问题）
+最后就是这样
+总之如果要使用ens的gene id的，上面的注释可以不改动，直接进行下面的代码操作
+
+```{r}
+detect_genes_ranked_ens <- function(rle_dataset) {
+  rle_dataset.gr <- makeGRangesFromDataFrame(rle_dataset, seqnames.field = "chr", start.field = "start", end.field = "end", keep.extra.columns = TRUE)
+  rle_dataset_gene_olap <- findOverlaps(rle_dataset.gr, genomewide.genes)
+  #下面存gene，对应的id中只有entrz中是无缺失值的，其他的gene id都是有NA值的
+  rle_dataset_genes <- rle_dataset_gene_olap %>%
+    as.data.frame() %>%
+    mutate(genes = genomewide.genes$gene_id[subjectHits]) %>%
+    dplyr::select(queryHits, genes) %>%
+    distinct()
+  #上面使用的gene id还是entrez id，如果使用ensgene的话会有NA值，虽然可以直接去重
+  tmpAB <- rle_dataset %>%
+    dplyr::select(chr, start, end, D.EV, switch) %>%
+    mutate(id = 1:nrow(rle_dataset))
+  rle_dataset_genes <- left_join(rle_dataset_genes, tmpAB, by = c("queryHits" = "id"))
+  #因为上面查询用的还是genomewide.genes_ens$gene_id，而不是ensgene，所以下面的from还是entrez
+  gene_symbols <- bitr(rle_dataset_genes$genes, fromType = "ENTREZID", toType = "ENSEMBL", OrgDb = OrgDb)  #!!!!!!!
+  rle_dataset_genes <- left_join(rle_dataset_genes, gene_symbols, by = c("genes" = "ENTREZID"))
+  # Aggregate by maximum absolute Eigenvector difference
+  rle_dataset_genes <- aggregate(D.EV ~ ENSEMBL, rle_dataset_genes, max)
+  # Append description
+  rle_dataset_genes <- left_join(rle_dataset_genes, gene_annotations, by = c("ENSEMBL" = "ensgene"))  #右边或者是ens或者是symbol
+  rle_dataset_genes <- rle_dataset_genes[, c("ENSEMBL", "D.EV", "description", "biotype")]
+  colnames(rle_dataset_genes)[1] <- "genes" # Rename the first column
+  # Order by largest to smallest difference
+  rle_dataset_genes <- rle_dataset_genes[order(rle_dataset_genes$D.EV, decreasing = TRUE), ]
+  # Return the dataset
+  rle_dataset_genes 
+}
+
+
+#下面的代码可以不用执行，因为操作过程中不涉及到gene id，可以symbol和ens通用
+AB_conditions_assigned_subset <- AB_conditions_assigned[, c("HMECchr", "HMECstart", "BT549end", "D.EV", "compartment")]
+colnames(AB_conditions_assigned_subset) <- c("chr", "start", "end", "D.EV", "switch")
+
+
+genes_AA_ranked_ens <- detect_genes_ranked_ens(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "AA", ])
+genes_BB_ranked_ens <- detect_genes_ranked_ens(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "BB", ])
+genes_AB_ranked_ens <- detect_genes_ranked_ens(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "AB", ])
+genes_BA_ranked_ens <- detect_genes_ranked_ens(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "BA", ])
+
+
+
+# All regions，这里对应的是没有使用padj过滤的所有dchic的区室信息，下面这段代码也是公用的，也可以不执行
+AB_conditions_assigned_all_subset <- AB_conditions_assigned_all[, c("HMECchr", "HMECstart", "BT549end", "D.EV", "compartment")]
+colnames(AB_conditions_assigned_all_subset) <- c("chr", "start", "end", "D.EV", "switch")
+
+#下面的同样换成ens的
+genes_all_ranked_ens <- detect_genes_ranked_ens(AB_conditions_assigned_all_subset)
+```
+
+#经过上面的代码转换：目前手头有
+ens geneid的：
+未padj过滤的genes_all_ranked_ens
+经padj过滤的genes_AA_ranked_ens等4类
+
+symbol geneid的：
+未padj过滤的genes_all_ranked
+经padj过滤的genes_all_ranked等4类
+
+#因为oncogene那一块使用的gene list是symbol，虽然可以转换为ens的id，但是比较麻烦，
+所以此处ens id的就不转换了
+
+
+# Save the data
+
+Save the gene lists with differential eigenvector values sorted, will be used in GSEA analysis 
+要注意，最后保存的这一个文件，是一个多sheet的表格文件！！！！！！！！！！
+每一个sheet都是结果!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+```{r}
+# Write out AB and BA gene/compartment data to Xcel spreadsheets
+#文件在script6/HMEC_vs_BT549_100kb_dchic/DifferentialResult/results/中，就是AB_gene_summary的xlsx表格文件,现在是改版的ens
+  x <- c(list(GenesAA = genes_AA_ranked_ens), list(GenesBB = genes_BB_ranked_ens), list(GenesAB = genes_AB_ranked_ens), list(GenesBA = genes_BA_ranked_ens), list(GenesAll = genes_all_ranked_ens), list(Summary = AB_summary), list(EVs_and_Compartments = AB_conditions_assigned), list(RLE = ABrun_all))
+  write_xlsx(x, path =file.path(dir_results, paste0("AB_gene_summary_", res_text,"_", padj_compartment_cutoff, "_ens.xlsx")))
+ 
+
+#genes_AA_ranked，363行，现在ens是374行
+#genes_BB_ranked，443行，ens是456行
+#genes_AB_ranked，1499行，ens是1546行
+#genes_BA_ranked，840行，ens是855
+#genes_all_ranked，22858行，ens是23945行
+#AB_conditions_assigned，4188行
+#AB_conditions_assigned_all，28466行
+
+```
+
+# Save BED files
+```{r}
+x <- data.frame(chr        = AB_conditions_assigned$HMECchr,
+                start      = AB_conditions_assigned$HMECstart,
+                end        = AB_conditions_assigned$HMECend,
+                name       = AB_conditions_assigned$compartment,
+                score      = -log10(AB_conditions_assigned$padj),
+                strand     = ".",
+                thickStart = AB_conditions_assigned$BT549start,
+                thickEnd   = AB_conditions_assigned$BT549end,
+                color = ifelse(AB_conditions_assigned$compartment == "AA", "255,0,0",
+                               ifelse(AB_conditions_assigned$compartment == "AB", "255,165,0",
+                                      ifelse(AB_conditions_assigned$compartment == "BA", "158,121,240",
+                                             ifelse(AB_conditions_assigned$compartment == "BB", "0,0,255", ""))))
+)
+# Keep full numbers
+x$start <- format(x$start, scientific = FALSE, trim = TRUE, justify = "none")
+x$end   <- format(x$end, scientific = FALSE, trim = TRUE, justify = "none")
+x$thickStart <- format(x$thickStart, scientific = FALSE, trim = TRUE, justify = "none")
+x$thickEnd   <- format(x$thickEnd, scientific = FALSE, trim = TRUE, justify = "none")
+# Append header
+x <- rbind(c("track itemRgb=On", rep("", ncol(x) - 1)), x)
+# Save the BED file,同样这里是有ens标注的
+fwrite(round_df(x), file = file.path(dir_results, paste0("AB_", res_text, "_", padj_compartment_cutoff, "_ens.bed")), quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+
+```
+
+
+
+
+
+# EDA of eigenvectors
+
+Independent code, for exploratory analysis of eigenvector concordance.
+注意下列文件中，虽然区室pc1在dchic上游call AB中是能够直接合并的，
+但是这里使用的文件实际上在dchic输出中是对应rep，就比如下面的bedGraph文件以及对应的selected pcs的文件,
+所以还是选择使用rep2的数据来处理
+
+下面的代码暂时不做，因为文件上并没有凑齐，可以在之后合并数据之后尝试一下
+
+```{r fig.height=2, fig.width=2}
+library(data.table)
+library(pheatmap)
+# Full dcHiC results, root folder，该文件夹下面含有数据包括对应的bedGraph文件以及对应的徐选择中的pc1的数据文件
+dir_data <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/HMEC_vs_BT549_100kb_dchic"
+# bedGraph folders，注意下面使用文件是rep2！！！！！！！！！！！
+dir_bedGraph_HMEC <- file.path(dir_data, "HMEC_rep2_100000_pca/intra_pca/HMEC_rep2_100000_mat")
+dir_bedGraph_BT549 <- file.path(dir_data, "BT549_rep2_100000_pca/intra_pca/BT549_rep2_100000_mat/")
+
+# Selected PCs 但是这个对应的tsv文件在dchic的输出中没有找到，不知道是不是因为dchic上游使用的命令不同还是因为使用的数据上有技术性rep的原因
+#试试看这块代码不执行的效果
+#pc_selected <- fread(file.path(dir_data, "chr_pc_selected.tsv"))
+#pc_selected <- as.data.frame(pc_selected)
+# Discordant selection 不一致的的主成分
+#print("Discordant PC selection")
+#kable(pc_selected[pc_selected$HMEC != pc_selected$BT549, ])
+
+# bedGraph correlation for each chromosome
+chromosomes <- paste0("chr", c(1:22, "X"))
+pcs <- c("PC1", "PC2") #注意，这里没有pc3
+for (chr in chromosomes) {
+  #print(paste("Selected:", pc_selected[pc_selected$chr == chr, ]))
+  print(paste("selected:",chr))
+  mtx <- matrix(0, nrow = length(pcs), ncol = length(pcs))
+  for (i in 1:length(pcs)) {
+    for (j in 1:length(pcs))
+      if(i >= j) {
+        pc_HMEC <- fread(file.path(dir_bedGraph_HMEC, paste0(chr, ".", pcs[i], ".bedGraph")))
+        pc_BT549 <- fread(file.path(dir_bedGraph_BT549, paste0(chr, ".", pcs[j], ".bedGraph")))
+        if (nrow(pc_HMEC) != nrow(pc_BT549)) {
+          print(paste("Length mismatch:", chr, "HMEC", pcs[i], "BT549", pcs[j]))
+        } else {
+          mtx[i, j] <- mtx[j, i] <- cor(pc_HMEC$V4, pc_BT549$V4)
+        }
+      }
+  }
+  colnames(mtx) <- rownames(mtx) <- paste(chr, pcs, sep = ".")
+  pheatmap(mtx, display_numbers = TRUE, cluster_cols = FALSE, cluster_rows = FALSE, legend = FALSE, treeheight_col = 0, treeheight_row = 0)
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###下面使用dchic中2 vs 5rep，即归并rep的HMEC vs TNBC区室分析：
+建议分析前清空之前的环境变量设置等
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+# Set up the environment
+library(knitr)
+opts_chunk$set(cache.path = "cache/", fig.path = "img/", cache = F, tidy = T, fig.keep = "high", echo = F, dpi = 100, warnings = F, message = F, comment = NA, warning = F, results = "as.is", fig.width = 10, fig.height = 6, cache.lazy = FALSE) # out.width=700,
+library(pander)
+panderOptions("table.split.table", Inf)
+set.seed(1)
+library(dplyr)
+options(stringsAsFactors = FALSE)
+```
+
+# Libraries
+
+```{r libraries}
+library(annotables)
+library(rCGH)
+library(GenomicRanges)
+library(clusterProfiler)
+# library(enrichR)
+library(tidyr)
+library(stringr)
+library(writexl)
+library(readr)
+library(ggplot2)
+library(reshape2)
+library(ggsci)
+library(grid)
+library(gridExtra)
+library(BSgenome)
+library(msigdbr)
+library(karyoploteR)
+#options(scipen = 999999999999999) 设置数值的显示精度，避免科学计数法（scientific notation）显示，没什么用
+library(data.table)
+library(MDmisc) # BiocManager::install("mdozmorov/MDmisc", update = FALSE)
+library("ggstatsplot") #主要就是后面对应的箱线图的时候需要进行美化，可以选用其他的ggplot函数
+```
+
+# Settings
+主要是padj的阈值，这一块可以看最后面的gene list，如果数量不合适，就可以考虑修改padj，改为0.05或者是0.01等
+！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+
+```{r}
+# General settings
+# Cutoff for significant AB compartment changes下面设置的cutoff阈值，如果是使用group-ori-未过滤，可以设置为0.1或者自己修改，如果是设置0.1就是原来dchic输出中的结果
+padj_compartment_cutoff <- 0.1  #如果分析显著转换的区室就是0.1，如果是分析没有过滤的数据也就是非显著转换的区室就是1
+
+# Rerun setting, affects overwriting files.后续如果要重新运行，这里记得要再次修改
+rerun <- TRUE
+# How to sort the barchart. If TRUE, only a sum of AB and BA changes is used. 
+# If FALSE, the total significant changes (AB, BA, AA, BB) is used
+#此设置影响柱状图的排序方式。如果设置为 TRUE，柱状图将基于 AB 和 BA 变化的总和进行排序。如果设置为 FALSE，柱状图将基于 AB、BA、AA 和 BB 类别的总显著变化进行排序。
+AB_BA <- TRUE
+```
+
+
+```{r}
+# dcHiC analysis settings
+dir_data <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/HMEC_vs_TNBC_100kb_dchic/DifferentialResult/"
+fileNameIn1 <- "HMEC_TNBC_100Kb/fdr_result/differential.intra_sample_group.Filtered.pcOri.bedGraph" 
+#filtered results，效果相当于下面的in2+padj阈值0.1，为了之后可以随时修改阈值检查效果方便，下面一切分析都使用in2
+fileNameIn2 <- "HMEC_TNBC_100Kb/fdr_result/differential.intra_sample_group.pcOri.bedGraph" # Full results，以这个文件为主，设置阈值去筛选
+#其实此处的in2，也就是原始的全部输出，其实理论上讲HMEC_BT549_100Kb/viz/files/intra_compartment.bedGraph和HMEC_BT549_100Kb/fdr_result/differential.intra_sample_group.pcOri.bedGraph室没有多大区别的，因为dchic的输出中其实就是将后者中为0的数据取了个padj最小的，然后整体上都-log10化了
+#所以整体上来讲，使用哪个都是没有太大问题的，因为如果是使用intra的话后面的数据处理中有将所有的padj的值都进行了-log10的反变换，所以其实实际上影响基本上没有，反正就是用哪个文件都一样
+
+
+# Resolution dchic的分析一律使用100kb
+res_number <- 100000
+res_text <- "100kb"
+# Results folder
+dir_results <- file.path(dir_data, "results") 
+#所有文件的输出都是在dchic建立的各自对应的比对文件夹下的下的DifferentialResult中！！！！！！！！！！！！！！！！！！！！！！1
+dir.create(dir_results, recursive = TRUE) # Create if does not exist
+# All results
+fileNameOut1 <- file.path(dir_results, paste0("AB_gene_summary_", res_text,"_", padj_compartment_cutoff, ".xlsx"))
+# BED file name
+fileNameOut2 <- file.path(dir_results, paste0("AB_", res_text, "_", padj_compartment_cutoff, ".bed"))
+```
+
+## Organism selection
+
+```{r organism}
+chr <- c(paste("chr", 1:22, sep = ""), "chrX") # Chromosomes，原先代码中没有展示x染色体，如果后面关于chr报错，可以改回paste0("chr", c(1:22))！！！！！！！！！！！
+# Import centromeric regions from rCGH 着丝粒还是问题染色体区域，要排除
+hg19_centro <- hg19
+# Change chromosome indicator to include "chr"
+hg19_centro$chrom <- paste0("chr", hg19_centro$chrom)   #chr23以及24改成X和Y,先不处理，看看有没有后续改变的需要
+#如果要修改，就是用chrom_map <- c(paste0("chr", 1:22), "chrX", "chrY")
+#hg19_centro$chrom <- chrom_map[as.numeric(hg19_centro$chrom)]
+
+# Make GRanges from centromeric locations
+hg19_centro.gr <- makeGRangesFromDataFrame(hg19_centro, seqnames.field = "chrom", start.field = "centromerStart", end.field = "centromerEnd", keep.extra.columns = TRUE)
+#根据中心着丝粒区域的起始位置和结束位置创建GRanges 对象
+
+library(org.Hs.eg.db) #导入基因注释信息，指定要使用的数据库、物种和 KEGG 数据集
+OrgDb <- "org.Hs.eg.db"
+species <- "hsa"
+KEGG <- "KEGG_2019_Human"
+
+# Annotables 筛选出符合条件的基因注释信息，并进行处理，包括去除重复项和空值项
+#从 grch37 数据框中选择了三列数据，分别是 "symbol"、"description" 和 "biotype"，获取规则染色体的这三列注释，可以通过grch37查看
+gene_annotations <- grch37[!(grepl("_", grch37$chr) | grepl("GL", grch37$chr)), c("symbol", "description", "biotype")]
+gene_annotations <- gene_annotations[!duplicated(gene_annotations$symbol) & !is.na(gene_annotations$symbol) & gene_annotations$description != "", ]
+
+# BSgenome settings 从指定的基因组数据包中获取染色体的长度信息，并将染色体名称和长度整理到一个数据框中
+bsgenome <- "BSgenome.Hsapiens.UCSC.hg19"
+chrom.sizes <- data.frame(chr = chr, size = seqlengths(getBSgenome(genome = bsgenome, masked = FALSE))[chr])
+
+# Get all human genes
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+genomewide.genes <- genes(TxDb.Hsapiens.UCSC.hg19.knownGene)
+#single.strand.genes.only=FALSE,上面这里会有一些正义反义链上的gene丢失掉
+genomewide.genes <- keepSeqlevels(genomewide.genes, c(paste0("chr", 1:22), "chrX"), pruning.mode = "tidy")
+#调用了 keepSeqlevels 函数，用于保留指定的染色体。在这个例子中，保留了 1 到 22 号染色体和 X 染色体
+gene_symbol <- bitr(genomewide.genes$gene_id, fromType = "ENTREZID", toType = "SYMBOL", OrgDb = OrgDb)
+#调用了 bitr 函数，用于将基因 ID 转换为基因符号。fromType 参数指定了输入的 ID 类型，toType 参数指定了输出的 ID 类型，OrgDb 参数指定了要使用的基因注释数据库
+gene_symbol <- left_join(gene_symbol, gene_annotations, by = c("SYMBOL" = "symbol"))
+#将基因符号与基因注释数据进行关联。by 参数指定了关联的列
+gene_symbol_entrez <- left_join(data.frame(gene_id = genomewide.genes$gene_id), gene_symbol, by = c("gene_id" = "ENTREZID"))
+#将基因 ID 与基因符号进行关联。by 参数指定了关联的列
+genomewide.genes$symbol <- gene_symbol_entrez$SYMBOL #将基因符号添加到 genomewide.genes 数据框中
+genomewide.genes$description <- gene_symbol_entrez$description #将基因描述添加到 genomewide.genes 数据框中
+genomewide.genes$biotype <- gene_symbol_entrez$biotype  #将基因生物类型添加到 genomewide.genes 数据框中
+
+
+# MSigDb organism
+msigdbr_org <- "Homo sapiens" # species
+```
+
+# Load A/B data and Replace Centromeric Regions with NaN 去除问题染色体区域
+
+```{r}
+# mtx_filtered <- read_tsv(file.path(dir_data, fileNameIn1)) # Filtered，这里可以直接读取前面0.1设置的数据
+# mtx_filtered <- as.data.frame(mtx_filtered)
+mtx_full <- read_tsv(file.path(dir_data, fileNameIn2)) # Full
+
+# Log10-untransform the p-value注意，下面的操作如果是导入viz文件夹中的intra的bedGraph文件，因为是从full的ori数据中执行了-log10，所以需要转化回来，但是我这里导入的是直接原始的group-ori-未过滤的数据，按照dchic的操作，是不需要再转换的，本身就是原生的padj值，详情参考上面中的filenamein2！！！！！！！！！！！！！！！！！！！1
+#mtx_full$padj <- 10^(-mtx_full$padj)
+
+#下面其实和上一个代码块中对着丝粒区域的处理是一致的
+# Chromosome sizes
+chrom_sizes <- data.frame(chr = chr, size = seqlengths(getBSgenome(genome = bsgenome, masked = FALSE))[chr])
+# Make GRanges #创建一个GRanges对象，表示每个染色体的范围
+chrom_sizes_gr <- GRanges(seqnames = paste0(chrom_sizes$chr), ranges = IRanges(start = 0, end = chrom_sizes$size))
+# import centromeric regions from rCGH
+hg19_centro<-hg19
+# change chromosome indicator to include "chr"
+hg19_centro$chrom <- paste0("chr", hg19_centro$chrom)
+#但是这里需要修改，将chr23和24修改为x和y，问题同上个代码块，因为这里要实际处理数据了
+hg19_centro$chrom <- ifelse(hg19_centro$chrom == "chr23", "chrX",
+                            ifelse(hg19_centro$chrom == "chr24", "chrY", hg19_centro$chrom))
+
+# make gRanges from centromeric locations 创建一个GRanges对象，表示每个染色体的中心粒的范围
+hg19_centro.gr<-makeGRangesFromDataFrame(hg19_centro, seqnames.field = "chrom", start.field = "centromerStart", end.field = "centromerEnd", keep.extra.columns = TRUE)
+# make gRanges from the resolution specific coordinates 创建一个GRanges对象，表示基因组中的一些特定区域，这里使用的就是dchic结果中识别出来的区室区域坐标
+AB.gr<-GRanges(seqnames = mtx_full$chr, IRanges(start = mtx_full$start, end = mtx_full$end))
+mcols(AB.gr) <- mtx_full[, c("TNBC", "HMEC", "sample_maha", "padj")] #将选定的列设置为GRanges对象的元数据,这些都是原来的mtx/也就是bedGraph中能够查看的
+
+# Remove regions outside of chromosome bounds #删除了与染色体边界之外的区域，先矫正AB区室的chr范围
+olap_chrom <- findOverlaps(AB.gr, chrom_sizes_gr)
+AB.gr <- AB.gr[ queryHits(olap_chrom) ]
+# Remove overlaps between the compartments and the centromeric regions #查找两个GRanges对象之间的重叠区域，即dchic识别出来的区室与中心粒区域
+olap_centromere<-findOverlaps(AB.gr, hg19_centro.gr)
+AB.gr$TNBC[ queryHits(olap_centromere) ] <- NA
+AB.gr$HMEC[ queryHits(olap_centromere) ] <- NA
+
+mtx_full <- as.data.frame(AB.gr)
+colnames(mtx_full)[1] <- "chr"
+
+#下面数据中的处理是源代码的，不用管，反正我是用来0.1的官方阈值
+# summary(mtx_filtered$padj) # max: 0.01
+# summary(mtx_full$padj) # max: 1
+# dim(mtx_full[mtx_full$padj <= max(mtx_filtered$padj), ]) # Filtered Full = Filtered
+# summary(mtx_filtered$sample_maha)
+# summary(mtx_full$sample_maha)
+# plot(density(mtx_filtered$glosh))
+# plot(density(mtx_full$glosh))
+# cor(mtx_filtered$sample_maha, mtx_filtered$BT549 - mtx_filtered$HMEC)
+# View(data.frame(mtx_filtered$sample_maha, mtx_filtered$BT549 - mtx_filtered$HMEC))
+```
+
+# Genome-wide proportion of A/B compartments 整体区室比例
+
+```{r}
+# Genome-wide proportion of AB compartments
+conditions <- c("HMEC", "TNBC") # Conditions
+
+# Matrix to store results
+proportioNumber_AB_genomewide <- matrix(data = 0, ncol = 2, nrow = 2) #创建一个矩阵，用于存储两种条件下的A/B区域的比例,所以是2x2
+colnames(proportioNumber_AB_genomewide) <- conditions
+rownames(proportioNumber_AB_genomewide) <- c("Proportion A", "Proportion B")
+# For a given condition, calculate the proportion of AB compartments
+for (j in conditions) {
+  proportioNumber_A <- sum(mtx_full[, j] >  0, na.rm = TRUE) / length(mtx_full[, j][!is.na(mtx_full[, j])] )
+  ##计算了mtx_full数据框中的某一列（由j指定）中大于0的值的数量，并除以该列中非缺失值的总数，以得到A区域的比例
+  proportioNumber_B <- sum(mtx_full[, j] <= 0, na.rm = TRUE) / length(mtx_full[, j][!is.na(mtx_full[, j])] )
+  ##计算了mtx_full数据框中的某一列（由j指定）中小于等于0的值的数量，并除以该列中非缺失值的总数，以得到B区域的比例
+  proportioNumber_AB_genomewide["Proportion A", j] <- proportioNumber_A
+  proportioNumber_AB_genomewide["Proportion B", j] <- proportioNumber_B
+}
+#使用 sum 函数计算满足条件 mtx_full[, j] > 0 的元素数量，除以非缺失值的总数，得到比例，计算大于0的值（即A区室）在数据中的比例（因为原始pc1数据中exp列就是pc1原始值，所以用j），B同理
+kable(round(proportioNumber_AB_genomewide, digits = 3))
+
+#	HMEC	TNBC
+#Proportion A	0.52	0.47
+#Proportion B	0.48	0.53
+```
+
+# Chromosome-specific proportion of A/B compartments 染色体区室比例
+
+- "HMECA", "HMECB", "TNBCA", "TNBCB" - the proportion of A and B compartments in each condition.
+- "A_log2FC", "B_log2FC" - log2 fold change in the A/B compartment proportions between TNBC and HMEC conditions.AB 区室比例的对数折叠变化 (log2 fold change) between TNBC 和 HMEC 条件
+- "AB_log2FC" - difference between the A/B ratios in each condition.每个条件下 A 区室比例与 B 区室比例的对数折叠变化
+
+```{r}
+# Matrix to store results 存储每个染色体在两个条件下的A/B区域的比例
+proportioNumber_AB_chromosome <- matrix(data = 0, ncol = 4, nrow = length(chr))
+colnames(proportioNumber_AB_chromosome) <- c("HMECA", "HMECB", "TNBCA", "TNBCB")
+rownames(proportioNumber_AB_chromosome) <- chr
+# For a given condition, calculate the proportion of AB compartments
+for (i in chr) {
+  for (j in conditions) {
+    mtx_full_subset <- mtx_full[mtx_full$chr == i, j]   
+    #对于每个染色体 i 和每个条件 j，从 mtx_full 数据框中选取染色体为 i 且条件为 j 的子集
+    proportioNumber_AB_chromosome[i, paste0(j, "A")] <- sum(mtx_full_subset >  0, na.rm = TRUE) / length(mtx_full_subset[!is.na(mtx_full_subset)])
+    proportioNumber_AB_chromosome[i, paste0(j, "B")] <- sum(mtx_full_subset <= 0, na.rm = TRUE) / length(mtx_full_subset[!is.na(mtx_full_subset)])
+  }
+}
+# Convert to data frame
+proportioNumber_AB_chromosome <- data.frame(Chromosome = rownames(proportioNumber_AB_chromosome), proportioNumber_AB_chromosome)#加了个染色体行名
+# Append ratio of A compartment change 添加了一个新的列"A_log2FC"，表示A区域的比例变化,在两个情况中
+proportioNumber_AB_chromosome <- proportioNumber_AB_chromosome %>% mutate(A_log2FC = log2(TNBCA) - log2(HMECA))
+# Append ratio of B compartment change 同上是B
+proportioNumber_AB_chromosome <- proportioNumber_AB_chromosome %>% mutate(B_log2FC = log2(TNBCB / HMECB))
+# Append ratio of A/B ratio compartment change A/B比率在不同情况下的差异
+proportioNumber_AB_chromosome <- proportioNumber_AB_chromosome %>% mutate(AB_log2FC = log2(HMECA / HMECB) - log2(TNBCA / TNBCB))
+# Display interactively
+DT::datatable(round_df(proportioNumber_AB_chromosome, 5), options = list(pageLength = 22))
+
+#上面是动态展示，建议是直接保存到csv文件中！！！！！！！！！！！！！！！！！！！！！！！！！！！
+write.csv(proportioNumber_AB_chromosome, "100kb_HMEC_vs_TNBC_proportioNumber_AB_chromosome.csv", row.names = TRUE)
+
+
+```
+
+# Data preparation, filtered 提取出dchic原始输出中经过padj cutofff阈值过滤的部分数据
+结果文件AB_conditions_assigned就是padj过滤之后+call AB的原始dchic结果数据框
+
+```{r}
+# Create data that resembles objects used in 05_AB_eigenvector，下面的EV就是特征向量值，就是原始pc1的值，就是±表征AB的值
+AB_HMEC <- data.frame(chr   = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "chr"] %>% unlist,
+                    start = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "start"] %>% unlist,
+                    end   = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "end"] %>% unlist,
+                    EV    = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "HMEC"] %>% unlist)
+AB_TNBC <- data.frame(chr   = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "chr"] %>% unlist,
+                    start = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "start"] %>% unlist,
+                    end   = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "end"] %>% unlist,
+                    EV    = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "TNBC"] %>% unlist)
+#AB_HMEC 和 AB_TNBC 数据框包含了染色体区域的信息，包括染色体名称 (chr)、起始位置 (start)、终止位置 (end) 以及 EV 值 (EV)
+AB_metadata <- data.frame(sample_maha = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "sample_maha"] %>% unlist,
+                          padj  = mtx_full[mtx_full$padj <= padj_compartment_cutoff, "padj"] %>% unlist)
+#AB_metadata 数据框包含了额外的元数据信息，包括 sample_maha 和 padj
+#上面实际上就是将dchic的输出拆分成了两份，一份是exp+染色体数据，另外一份是检验性数据
+
+# run assignment function on the data 依据EV即pc1值±为新列compartment赋值AB
+AB_HMEC_assigned <- AB_HMEC; AB_HMEC_assigned$compartment <- ifelse(AB_HMEC_assigned$EV >= 0, "A", "B")
+AB_TNBC_assigned <- AB_TNBC; AB_TNBC_assigned$compartment <- ifelse(AB_TNBC_assigned$EV >= 0, "A", "B")
+
+# Add dataset signifier to each column for distinguishing the two data sets in combined data frame列名添加前缀，以便区分两个数据集在合并数据框中的来源
+colnames(AB_HMEC_assigned) <- paste0("HMEC", colnames(AB_HMEC_assigned))
+colnames(AB_TNBC_assigned) <- paste0("TNBC", colnames(AB_TNBC_assigned))
+
+# combine the two datasets
+AB_conditions_assigned <- cbind(AB_HMEC_assigned, AB_TNBC_assigned)
+
+# create a column for the difference in EV for each region between the two datasets#数据框创建了一个名为 D.EV 的新列，用于存储两个数据集之间 EV 列的差异
+AB_conditions_assigned$D.EV <- AB_conditions_assigned$TNBCEV - AB_conditions_assigned$HMECEV  #EV是score相减，变化
+AB_conditions_assigned$compartment <- paste0(AB_conditions_assigned$HMECcompartment, AB_conditions_assigned$TNBCcompartment) #这里是AB.BA等变化 
+AB_conditions_assigned <- cbind(AB_conditions_assigned, AB_metadata)#前面从原始mtx数据中提取出来两个子数据，一个就是上面的ABcondition，要进行操作，另外一个是metadata不进行操作
+
+write.csv(AB_conditions_assigned, "100kb_HMEC_vs_TNBC_AB_conditions_assigned_filtered.csv", row.names = TRUE)
+```
+
+# Data preparation, unfiltered 不经过padj过滤，还是使用原始的dchic产出的group-ori的数据
+结果文件AB_conditions_assigned_all就是没有padj过滤但是call AB的原始dchic结果数据框
+
+```{r}
+# Create data that resembles objects used in 05_AB_eigenvector
+AB_HMEC_all <- data.frame(chr   = mtx_full[, "chr"  ] %>% unlist,
+                        start = mtx_full[, "start"] %>% unlist,
+                        end   = mtx_full[, "end"  ] %>% unlist,
+                        EV    = mtx_full[, "HMEC"   ] %>% unlist)
+AB_TNBC_all <- data.frame(chr   = mtx_full[, "chr"  ] %>% unlist,
+                        start = mtx_full[, "start"] %>% unlist,
+                        end   = mtx_full[, "end"  ] %>% unlist,
+                        EV    = mtx_full[, "TNBC"   ] %>% unlist)
+AB_metadata_all <- data.frame(sample_maha = mtx_full[, "sample_maha"] %>% unlist,
+                          padj  = mtx_full[, "padj"] %>% unlist)
+
+# run assignment function on the data
+AB_HMEC_all_assigned <- AB_HMEC_all; AB_HMEC_all_assigned$compartment <- ifelse(AB_HMEC_all_assigned$EV >= 0, "A", "B")
+AB_TNBC_all_assigned <- AB_TNBC_all; AB_TNBC_all_assigned$compartment <- ifelse(AB_TNBC_all_assigned$EV >= 0, "A", "B")
+
+# Add dataset signifier to each column for distinguishing the two data sets in combined data frame
+colnames(AB_HMEC_all_assigned) <- paste0("HMEC", colnames(AB_HMEC_all_assigned))
+colnames(AB_TNBC_all_assigned) <- paste0("TNBC", colnames(AB_TNBC_all_assigned))
+
+# combine the two datasets
+AB_conditions_assigned_all <- cbind(AB_HMEC_all_assigned, AB_TNBC_all_assigned)
+
+# create a column for the difference in EV for each region between the two datasets
+AB_conditions_assigned_all$D.EV <- AB_conditions_assigned_all$TNBCEV - AB_conditions_assigned_all$HMECEV
+AB_conditions_assigned_all$compartment <- paste0(AB_conditions_assigned_all$HMECcompartment, AB_conditions_assigned_all$TNBCcompartment)
+AB_conditions_assigned_all <- cbind(AB_conditions_assigned_all, AB_metadata_all)
+
+write.csv(AB_conditions_assigned_all, "100kb_HMEC_vs_TNBC_AB_conditions_assigned_unfiltered.csv", row.names = TRUE)
+```
+
+
+## Exploratory analysis of eigenvector differences and other measures 就是前面的filter以及unfilter的数据，因为已经保存为csv文件了
+
+```{r}
+DT::datatable(AB_conditions_assigned)
+#DT::datatable(AB_conditions_assigned_all)
+```
+
+
+# RLE, Run Length Encoding
+确定连续区域中具有相同标识的区域（例如，从 A 到 A，从 A 到 B 等）
+利用运行长度编码 (Run-Length Encoding, RLE) 来确定连续区域中具有相同身份的区室（例如，A 到 A，A 到 B等）的长度和身份
+Rle for determining consecutive regions of compartments with same identity (e.g. A to A, A to B, etc )
+
+下面用的数据是AB_conditions_assigned，也就是padj过滤之后的区室数据框
+ABrun_all
+ABrun_AB
+ABrun_BA
+
+```{r}
+# empty dataframe for the RLE information to be stored
+ABrun_all <- data.frame()
+# for each chromosome
+for (i in chr) {
+  # first subset by chromosome
+  AB_conditions_assigned_chr <- subset(AB_conditions_assigned, HMECchr == i)
+  # run RLE and extract the results into a dataframe. Contains the length of each continuous segment and the identity of the run (AB, BA, AA, BB). Length is in number of segments of each segment type, so multiply by resolution.
+  #将运行长度编码的结果转换为数据框，其中包含了连续相同值的长度和这些值的标识
+  #对于每个染色体，首先通过染色体进行子集操作，然后运行 RLE 并将结果提取到一个数据框中。这个数据框包含了每个连续段的长度以及区室类型（AB，BA，AA，BB）。长度以每个段类型的段数表示，因此需要乘以分辨率来获得实际长度
+  ABrun <- data.frame(lengths = unclass(rle(AB_conditions_assigned_chr$compartment)$lengths * res_number), compartment = unclass(rle(AB_conditions_assigned_chr$compartment)$values))
+  # Fix for the end coordinate of the chromosome not spanning full resolution bin size 修正最后一个区域的长度，因为染色体的末尾可能不是完整的分辨率大小
+  #将 ABrun 数据框中最后一行的 lengths 列的值设置为 ABrun$lengths 列的最后一个值减去分辨率的大小再加上染色体的长度
+  ABrun[nrow(ABrun), "lengths"] <- last(ABrun$lengths) - res_number + (max(AB_conditions_assigned_chr$HMECend) - max(AB_conditions_assigned_chr$HMECstart) + 1)
+  # rearrange the results of rle to get the coordinates of the AB compartments to correspond to resolution size调整 RLE 结果，使得AB区域的坐标对应于分辨率大小。将起始坐标设为零，并使用长度的累积和来确定区域范围的结束坐标
+  # make the start coordinate zero
+  ABrun$start <- 0
+  # use the cumulative sum of the lengths at each row to determine the end coordinates of the region range 
+  ABrun$end <- cumsum(ABrun$lengths)
+  
+  #对于每个区域，使用偏移坐标来设置起始坐标，并修正每个区域的起始坐标，以确保它们的结束坐标是下一个区域的起始坐标加1。同时修正第一个区域的起始坐标，因为它是NA
+  # use a lag of one to offset the end coordinates
+  lag <- lag(ABrun, 1L)
+  # use the offset coordinates in the lag object to set the start coordinates
+  ABrun$start <- lag$end
+  # fix start coordinates of each range so that they end in 1; otherwise each consecutive start coordinate is the same as the previous region's end coordinate
+  ABrun$start <- ABrun$start + 1
+  # fix first region's start coordinate, which is an NA, by changing it simply to 1
+  ABrun[1, "start"] <- 1
+  # add a column with the chr
+  ABrun$chr <- i
+  # combine the data for each chromosome into a whole genome object
+  ABrun_all <- rbind(ABrun_all, ABrun)
+}
+# subset the master dataframe of all run lengths to just those for A to A and B to B for downstream gene analysis.
+#将所有染色体的数据组合到 ABrun_all 中，然后从中选择 A 到 B 和 B 到 A 的区域，以用于后续的基因分析。这些子集分别保存在 ABrun_AB 和 ABrun_BA 中
+ABrun_AB <- subset(ABrun_all, compartment == "AB")
+ABrun_BA <- subset(ABrun_all, compartment == "BA")
+```
+
+# Summary of AB compartments
+
+- Only significant changes are considered.
+- Changes within the same compartment type are possible.
+- "Percent_XX" - percent of AB compartment changes with respect to chromosome length.
+- "Number_XX" - number of resolution bins of AB compartment changes.
+- "AB/BA_min/max/med" - min mean and max run lengths for AB and BA compartment changes for each chromosome, calculations are divided by 1000 to convert bases to kb
+仅考虑显著性变化。
+同一区室类型内的变化是可能的。
+"Percent_XX" - AB区室变化占染色体长度的百分比。
+"Number_XX" - AB区室变化的分辨率箱数。
+"AB/BA_min/max/med" - 每个染色体的AB和BA区室变化的最小、平均和最大运行长度，计算结果除以1000以转换为kb单位。
+
+
+结果文件
+AB_summary 数据框将包含了染色体上AB区室变化的摘要信息，包括区室类型比例、区室变化百分比以及区室变化的运行长度等信息
+使用的是过滤后的dchic区室数据（用的数据是AB_conditions_assigned，也就是padj过滤之后的区室数据框）
+HMEC_A 染色体chr上HMEC A区室占据染色体chr全长的百分比
+Percent_AA  AA类型的区室变化在染色体长度中的百分比
+Number_AA  AA类型的区室变化的bin数目
+AB_min 每条chr上AB区室变换的最小bin
+```{r}
+# empty data frame to contain the summary data
+AB_summary <- data.frame(chr = chr)
+
+# modify how the chromosomes in the chom.sizes object are formatted. Adds "chr" to make it compatible with the RLE and combined EV datasets
+# chrom.sizes$chr <- paste0("chr", chrom.sizes$chr)
+
+for (i in chr) {
+  #print(chr)
+  # subset the combined data by chromosome
+  AB_conditions_assigned_chr <- subset(AB_conditions_assigned, HMECchr == i)
+  # subset the computed RLE data by chromosome从ABrun_all数据框中筛选出当前染色体 i 的RLE数据，并存储在ABrun中
+  ABrun <- subset(ABrun_all, chr == i)
+  # subset the per chromosome data into AB and BA compartments
+  AB_chr <- subset(ABrun, compartment == "AB")
+  BA_chr <- subset(ABrun, compartment == "BA")
+  #分别计算HMEC和TNBC数据中A和B区室的百分比
+  # percent of HMEC data that is in an A compartment  ( # of regions assigned as A times resolution divided by total chromosome size )当前染色体 i 中HMEC数据中A区室的百分比
+  AB_summary$HMEC_A[which(AB_summary$chr == i)] <- round(length(AB_conditions_assigned_chr$HMECcompartment[which(AB_conditions_assigned_chr$HMECcompartment == "A")]) * res_number / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # percent of HMEC data that is in an B compartment  ( # of regions assigned as B times resolution divided by total chromosome size )当前染色体 i 中HMEC数据中B区室的百分比
+  AB_summary$HMEC_B[which(AB_summary$chr == i)] <- round(length(AB_conditions_assigned_chr$HMECcompartment[which(AB_conditions_assigned_chr$HMECcompartment == "B")]) * res_number / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # percent of TNBC data that is in an A compartment  ( # of regions assigned as A times resolution divided by total chromosome size )当前染色体 i 中TNBC数据中A区室的百分比
+  AB_summary$TNBC_A[which(AB_summary$chr == i)] <- round(length(AB_conditions_assigned_chr$TNBCcompartment[which(AB_conditions_assigned_chr$TNBCcompartment == "A")]) * res_number / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # percent of TNBC data that is in an B compartment  ( # of regions assigned as B times resolution divided by total chromosome size )当前染色体 i 中TNBC数据中B区室的百分比
+  AB_summary$TNBC_B[which(AB_summary$chr == i)] <- round(length(AB_conditions_assigned_chr$TNBCcompartment[which(AB_conditions_assigned_chr$TNBCcompartment == "B")]) * res_number / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  
+  #计算四种类型的区室变化在染色体长度中的百分比
+  # Percent of chromosome length as one of four switches: AA, BB, AB, BA.  These are summed together in a fifth category of switch type
+  # Percent of chromosome that was A to A compartment compartment  AA类型区室变化在染色体长度中的百分比
+  AB_summary$Percent_AA[which(AB_summary$chr == i)] <- round(sum(AB_conditions_assigned_chr$HMECend[AB_conditions_assigned_chr$compartment == "AA"] - AB_conditions_assigned_chr$HMECstart[AB_conditions_assigned_chr$compartment == "AA"]) / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # Percent of chromosome that was B to B compartment compartment  BB类型区室变化在染色体长度中的百分比
+  AB_summary$Percent_BB[which(AB_summary$chr == i)] <- round(sum(AB_conditions_assigned_chr$HMECend[AB_conditions_assigned_chr$compartment == "BB"] - AB_conditions_assigned_chr$HMECstart[AB_conditions_assigned_chr$compartment == "BB"]) / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # Percent of chromosome that was A to B compartment compartment  AB类型区室变化在染色体长度中的百分比
+  AB_summary$Percent_AB[which(AB_summary$chr == i)] <- round(sum(AB_conditions_assigned_chr$HMECend[AB_conditions_assigned_chr$compartment == "AB"] - AB_conditions_assigned_chr$HMECstart[AB_conditions_assigned_chr$compartment == "AB"]) / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+  # Percent of chromosome that was B to A compartment compartment  BA类型区室变化在染色体长度中的百分比
+  AB_summary$Percent_BA[which(AB_summary$chr == i)] <- round(sum(AB_conditions_assigned_chr$HMECend[AB_conditions_assigned_chr$compartment == "BA"] - AB_conditions_assigned_chr$HMECstart[AB_conditions_assigned_chr$compartment == "BA"]) / chrom.sizes$size[which(chrom.sizes$chr == i)] * 100, 2)
+   
+   # Total number of bins with AB compartment changes计算了AB区室变化的总数和不同类型区室的总数
+  # Total number of bins staying AA 
+  AB_summary$Number_AA[which(AB_summary$chr == i)] <- sum(AB_conditions_assigned_chr$compartment == "AA")
+  # Total number of bins staying BB 
+  AB_summary$Number_BB[which(AB_summary$chr == i)] <- sum(AB_conditions_assigned_chr$compartment == "BB")
+  # Total number of bins switching AB
+  AB_summary$Number_AB[which(AB_summary$chr == i)] <- sum(AB_conditions_assigned_chr$compartment == "AB")
+  # Total number of bins switching BA
+  AB_summary$Number_BA[which(AB_summary$chr == i)] <- sum(AB_conditions_assigned_chr$compartment == "BA")
+  
+  # add min mean and max run lengths for AB and BA compartment changes for each chromosome计算AB和BA区室变化的最小、平均和最大运行长度，并转换为kb单位
+  # AB min, mean, and max of run lengths. Calculations are divided by 1000 to convert bases to kb.
+  if (nrow(AB_chr) > 0) {
+    AB_summary$ABmin[which(AB_summary$chr == i)] <- round(min(AB_chr$lengths) / res_number, 0)
+    AB_summary$ABmean[which(AB_summary$chr == i)] <- round(mean(AB_chr$lengths) / res_number, 2)
+    AB_summary$ABmax[which(AB_summary$chr == i)] <- round(max(AB_chr$lengths) / res_number, 0)
+  } else {
+    AB_summary$ABmin[which(AB_summary$chr == i)] <- 0
+    AB_summary$ABmean[which(AB_summary$chr == i)] <- 0
+    AB_summary$ABmax[which(AB_summary$chr == i)] <- 0
+  }
+  # BA min, mean, and max of run lengths
+  if (nrow(BA_chr) > 0) {
+    AB_summary$BAmin[which(AB_summary$chr == i)] <- round(min(BA_chr$lengths) / res_number, 0)
+    AB_summary$BAmean[which(AB_summary$chr == i)] <- round(mean(BA_chr$lengths) / res_number, 2)
+    AB_summary$BAmax[which(AB_summary$chr == i)] <- round(max(BA_chr$lengths) / res_number, 0)
+  } else {
+    AB_summary$BAmin[which(AB_summary$chr == i)] <- 0
+    AB_summary$BAmean[which(AB_summary$chr == i)] <- 0
+    AB_summary$BAmax[which(AB_summary$chr == i)] <- 0
+  }
+}
+# Subset and rename columns
+#AB_summary <- AB_summary[, c("chr", "Percent_AA", "Percent_BB", "Percent_AB", "Percent_BA", "Number_AA", "Number_BB", "Number_AB", "Number_BA")]
+# Visualize
+DT::datatable(AB_summary, options = list(pageLength = 22))
+
+write.csv(AB_summary, "100kb_HMEC_vs_TNBC_AB_summary.csv", row.names = TRUE)
+```
+
+# KaryoploteR Plots and Per Chromosome AB Compartments and EVs 染色体核型图+AB/EV
+用的还是过滤之后的区室数据
+源代码中x0，x1并没有修改，选的都是start，
+我修改成了x0 start，x1 end
+其实从效果上看基本没有区别，大概是因为坐标区间平移但是区间太小了不明显，只保留原来的一副就行了
+```{r fig.height=4}
+# diagnostic plots of the AB compartments and changes. Each data set EV is plotted and the change in EV and color coded to identify switches
+for (i in chr) {
+  # subset by chromosome
+  AB_conditions_assigned_chr <- subset(AB_conditions_assigned, HMECchr == i)
+  # subset the per chromosome switch types
+  # AB switches
+  chr_ab <- subset(AB_conditions_assigned_chr, compartment == "AB")
+  # BA switches
+  chr_ba <- subset(AB_conditions_assigned_chr, compartment == "BA")
+  # AA switches
+  chr_aa <- subset(AB_conditions_assigned_chr, compartment == "AA")
+  # BB switches
+  chr_bb <- subset(AB_conditions_assigned_chr, compartment == "BB")
+
+  # plot the chromosome
+  kp <- plotKaryotype(chromosomes = i, genome = "hg19", plot.type = 1)
+  # add base numbers to the plot
+  kpAddBaseNumbers(kp)
+
+  # HMEC EV plot
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.0
+  r1 <- 0.35
+  # Add the HMEC EVs segments and scale to the min and max of the EV values，下面的x0和x1要不要改一下，包括TNBC！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！源代码没改
+  kpSegments(kp, chr = i, x0 = AB_conditions_assigned_chr$HMECstart, x1 = AB_conditions_assigned_chr$HMECstart, y0 = 0, y1 = AB_conditions_assigned_chr$HMECEV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$HMECEV, na.rm = T), ymin = min(AB_conditions_assigned_chr$HMECEV, na.rm = T))
+  # Add the HMEC EV plot label
+  kpAddLabels(kp, labels = "HMEC", r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.04, cex = 1.0)
+  # Add the axis, scaled for min and max of the HMEC EVs
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$HMECEV, na.rm = T), ymin = min(AB_conditions_assigned_chr$HMECEV, na.rm = T), tick.pos = c(max(AB_conditions_assigned_chr$HMECEV, na.rm = T), 0, min(AB_conditions_assigned_chr$HMECEV, na.rm = T)))
+  # Add A and B labels to the axis
+  kpAddLabels(kp, labels = "B", r0 = r0, r1 = r0 + ((r1 - r0) / 2), cex = 1.0)
+  kpAddLabels(kp, labels = "A", r0 = r0 + ((r1 - r0) / 2), r1 = r1, cex = 1.0)
+
+  # TNBC EV plot
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.4
+  r1 <- 0.75
+  # Add the TNBC EVs segments and scale to the min and max of the EV values
+  kpSegments(kp, chr = i, x0 = AB_conditions_assigned_chr$TNBCstart, x1 = AB_conditions_assigned_chr$TNBCstart, y0 = 0, y1 = AB_conditions_assigned_chr$TNBCEV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$TNBCEV, na.rm = T), ymin = min(AB_conditions_assigned_chr$TNBCEV, na.rm = T), col = "#666666")
+  # Add the TNBC EV plot label
+  kpAddLabels(kp, labels = "TNBC", r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.04, cex = 1.0)
+  # Add the axis, scaled for min and max of the TNBC EVs
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$TNBCEV, na.rm = T), ymin = min(AB_conditions_assigned_chr$TNBCEV, na.rm = T), tick.pos = c(max(AB_conditions_assigned_chr$TNBCEV, na.rm = T), 0, min(AB_conditions_assigned_chr$TNBCEV, na.rm = T)))
+  # Add A and B labels to the axis
+  kpAddLabels(kp, labels = "B", r0 = r0, r1 = r0 + ((r1 - r0) / 2), cex = 1.0)
+  kpAddLabels(kp, labels = "A", r0 = r0 + ((r1 - r0) / 2), r1 = r1, cex = 1.0)
+
+  # Delta EV plot,对应TNBC EV VS HMEC EV
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.8
+  r1 <- 1.1
+  # Plot the AA delta EV segments，包括这里的x0和x1！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+  kpSegments(kp, chr = i, x0 = chr_aa$HMECstart, x1 = chr_aa$HMECstart, y0 = 0, y1 = chr_aa$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "gray")
+  # Plot the BB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_bb$HMECstart, x1 = chr_bb$HMECstart, y0 = 0, y1 = chr_bb$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "gray")
+  # Plot the AB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ab$HMECstart, x1 = chr_ab$HMECstart, y0 = 0, y1 = chr_ab$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "blue")
+  # Plot the BA delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ba$HMECstart, x1 = chr_ba$HMECstart, y0 = 0, y1 = chr_ba$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "red")
+  # Add axis labels
+  kpAddLabels(kp, labels = expression(paste(Delta, "EV")), r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.035, cex = 1.0)
+  # Add the axis scaled to the min and max of the delta EV values
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), tick.pos = c(round(max(AB_conditions_assigned_chr$D.EV, na.rm = T), 3), 0, round(min(AB_conditions_assigned_chr$D.EV, na.rm = T), 3)))
+
+  # Add the legend indicating the color of the switches in the delta EV plot
+  legend(x = "top", fill = c("gray", "gray", "blue", "red"), legend = c("AA", "BB", "AB", "BA"), y.intersp = 1, ncol = 4, cex = 1,  inset = c(0, -0.2), xpd = TRUE)
+  
+  #注意在里面一张一张保存图片,无法保存
+  #ggsave(paste0(i, "_100kb_HMEC_vs_TNBC_KaryoploteR_x0start_x1start.pdf"), width = 10, height = 7)
+  #100kb_HMEC_vs_TNBC_KaryoploteR_x0start_x1start_chr.pdf
+}
+
+
+
+
+
+#下面是修改过的x0，x1
+for (i in chr) {
+  # subset by chromosome
+  AB_conditions_assigned_chr <- subset(AB_conditions_assigned, HMECchr == i)
+  # subset the per chromosome switch types
+  # AB switches
+  chr_ab <- subset(AB_conditions_assigned_chr, compartment == "AB")
+  # BA switches
+  chr_ba <- subset(AB_conditions_assigned_chr, compartment == "BA")
+  # AA switches
+  chr_aa <- subset(AB_conditions_assigned_chr, compartment == "AA")
+  # BB switches
+  chr_bb <- subset(AB_conditions_assigned_chr, compartment == "BB")
+
+  # plot the chromosome
+  kp <- plotKaryotype(chromosomes = i, genome = "hg19", plot.type = 1)
+  # add base numbers to the plot
+  kpAddBaseNumbers(kp)
+
+  # HMEC EV plot
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.0
+  r1 <- 0.35
+  # Add the HMEC EVs segments and scale to the min and max of the EV values，下面的x0和x1要不要改一下，包括BT549！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！源代码没改
+  kpSegments(kp, chr = i, x0 = AB_conditions_assigned_chr$HMECstart, x1 = AB_conditions_assigned_chr$HMECend, y0 = 0, y1 = AB_conditions_assigned_chr$HMECEV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$HMECEV, na.rm = T), ymin = min(AB_conditions_assigned_chr$HMECEV, na.rm = T))
+  # Add the HMEC EV plot label
+  kpAddLabels(kp, labels = "HMEC", r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.04, cex = 1.0)
+  # Add the axis, scaled for min and max of the HMEC EVs
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$HMECEV, na.rm = T), ymin = min(AB_conditions_assigned_chr$HMECEV, na.rm = T), tick.pos = c(max(AB_conditions_assigned_chr$HMECEV, na.rm = T), 0, min(AB_conditions_assigned_chr$HMECEV, na.rm = T)))
+  # Add A and B labels to the axis
+  kpAddLabels(kp, labels = "B", r0 = r0, r1 = r0 + ((r1 - r0) / 2), cex = 1.0)
+  kpAddLabels(kp, labels = "A", r0 = r0 + ((r1 - r0) / 2), r1 = r1, cex = 1.0)
+
+  # BT549 EV plot
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.4
+  r1 <- 0.75
+  # Add the BT549 EVs segments and scale to the min and max of the EV values
+  kpSegments(kp, chr = i, x0 = AB_conditions_assigned_chr$BT549start, x1 = AB_conditions_assigned_chr$BT549end, y0 = 0, y1 = AB_conditions_assigned_chr$BT549EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$BT549EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$BT549EV, na.rm = T), col = "#666666")
+  # Add the BT549 EV plot label
+  kpAddLabels(kp, labels = "BT549", r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.04, cex = 1.0)
+  # Add the axis, scaled for min and max of the BT549 EVs
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$BT549EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$BT549EV, na.rm = T), tick.pos = c(max(AB_conditions_assigned_chr$BT549EV, na.rm = T), 0, min(AB_conditions_assigned_chr$BT549EV, na.rm = T)))
+  # Add A and B labels to the axis
+  kpAddLabels(kp, labels = "B", r0 = r0, r1 = r0 + ((r1 - r0) / 2), cex = 1.0)
+  kpAddLabels(kp, labels = "A", r0 = r0 + ((r1 - r0) / 2), r1 = r1, cex = 1.0)
+
+  # Delta EV plot,对应BT549 EV VS HMEC EV
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.8
+  r1 <- 1.1
+  # Plot the AA delta EV segments，包括这里的x0和x1！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+  kpSegments(kp, chr = i, x0 = chr_aa$HMECstart, x1 = chr_aa$HMECend, y0 = 0, y1 = chr_aa$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "gray")
+  # Plot the BB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_bb$HMECstart, x1 = chr_bb$HMECend, y0 = 0, y1 = chr_bb$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "gray")
+  # Plot the AB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ab$HMECstart, x1 = chr_ab$HMECend, y0 = 0, y1 = chr_ab$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "blue")
+  # Plot the BA delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ba$HMECstart, x1 = chr_ba$HMECend, y0 = 0, y1 = chr_ba$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "red")
+  # Add axis labels
+  kpAddLabels(kp, labels = expression(paste(Delta, "EV")), r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.035, cex = 1.0)
+  # Add the axis scaled to the min and max of the delta EV values
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), tick.pos = c(round(max(AB_conditions_assigned_chr$D.EV, na.rm = T), 3), 0, round(min(AB_conditions_assigned_chr$D.EV, na.rm = T), 3)))
+
+  # Add the legend indicating the color of the switches in the delta EV plot
+  legend(x = "top", fill = c("gray", "gray", "blue", "red"), legend = c("AA", "BB", "AB", "BA"), y.intersp = 1, ncol = 4, cex = 1,  inset = c(0, -0.2), xpd = TRUE)
+  
+  #ggsave(paste0(i, "_100kb_HMEC_vs_BT549_KaryoploteR_x0start_x1end.pdf"), width = 10, height = 7)
+}
+```
+
+#下面的可以不操作
+```{r eval=FALSE}
+# Similar to plots in the above code chunk, but plots only the per chromosome change in EVs and groups AA and BB changes into one color. Easier to see regions that contain AB or BA switches
+#同样道理，只有EV一条轨道，start和end效果上没有区别，还是保存了start+start，没影响 
+
+for (i in chr) {
+  # subset by chromosome
+  AB_conditions_assigned_chr <- subset(AB_conditions_assigned, HMECchr == i)
+  # subset the per chromosome switch types
+  # AB switches
+  chr_ab <- subset(AB_conditions_assigned_chr, compartment == "AB")
+  # BA switches
+  chr_ba <- subset(AB_conditions_assigned_chr, compartment == "BA")
+  # AA switches
+  chr_aa <- subset(AB_conditions_assigned_chr, compartment == "AA")
+  # BB switches
+  chr_bb <- subset(AB_conditions_assigned_chr, compartment == "BB")
+
+  # plot each chromosome
+  kp <- plotKaryotype(chromosomes = i, genome = "hg19", plot.type = 1)
+  # add base numbers
+  kpAddBaseNumbers(kp)
+  # Delta EV plot (TNBC EV minus HMEC EV)
+  # define r0 and r1, the min and max of the plot area. Allows for easy scaling of the plot area
+  r0 <- 0.4
+  r1 <- 0.75
+  # Plot the AA delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_aa$HMECstart, x1 = chr_aa$HMECstart, y0 = 0, y1 = chr_aa$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "#666666")
+  # Plot the BB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_bb$HMECstart, x1 = chr_bb$HMECstart, y0 = 0, y1 = chr_bb$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "#666666")
+  # Plot the AB delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ab$HMECstart, x1 = chr_ab$HMECstart, y0 = 0, y1 = chr_ab$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "blue")
+  # Plot the BA delta EV segments
+  kpSegments(kp, chr = i, x0 = chr_ba$HMECstart, x1 = chr_ba$HMECstart, y0 = 0, y1 = chr_ba$D.EV, r0 = r0, r1 = r1, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), col = "red")
+  # Add axis labels
+  kpAddLabels(kp, labels = expression(paste(Delta, "EV")), r0 = r0, r1 = r1, data.panel = 1, label.margin = 0.035, cex = 1.0)
+  # Add the axis scaled to the min and max of the delta EV values
+  kpAxis(kp, r0 = r0, r1 = r1, cex = 0.65, ymax = max(AB_conditions_assigned_chr$D.EV, na.rm = T), ymin = min(AB_conditions_assigned_chr$D.EV, na.rm = T), tick.pos = c(round(max(AB_conditions_assigned_chr$D.EV, na.rm = T), 3), 0, round(min(AB_conditions_assigned_chr$D.EV, na.rm = T), 3)))
+  # Add the legend indicating the color of the switches in the delta EV plot
+  legend(x = "top", fill = c("#666666", "blue", "red"), legend = c("AA and BB", "AB", "BA"), y.intersp = 0.7, ncol = 3, cex = 0.95)
+}
+
+```
+
+# Bar charts
+Summary of bar charts for each dataset and differences between datasets on a per chromosomal basis. 
+用的是AB_summary，所以还是padj过滤之后的区室数据框
+每条chr上HMEC AB区室占据chr全长比例
+         TNBC同理
+第三张图sum就是区室转换区域占据chr全长比例
+所以我比对源码修改了标题以及pdf文件名字
+HMEC AB Compartment By Chromosome——》100kb_HMEC_vs_TNBC_HMEC_AB_ratio_per_chr_
+第三个没改：AB Compartment switches By Chromosome——》100kb_HMEC_vs_TNBC_AB_switches_per_chr_
+```{r fig.height=4}
+# generates summary bar charts for each data set and the differences between datasets on a per chromosomal basis.
+# Note: some regions have NA for EV so the total doesn't always sum to 100%
+# !Need to summarize across all chromosomes once chr23 EVs are computed.
+
+# HMEC summary stacked bar plots
+# subset the summary file for just the HMEC relevant data
+#堆叠柱状图，展示每个染色体中 A 区域和 B 区域的百分比
+HMEC_summary <- AB_summary[, c("chr", "HMEC_A", "HMEC_B")]
+# reformat the data to the preferred long format for the stacked bar plots. Also remove "chr" from chromosome names 使用mutate函数将"chr"列转换为因子变量，并使用gather函数将数据从宽格式转换为长格式，存储在HMEC_summary（或BT549_summary）中。这将数据从每个染色体的"HMEC_A"和"HMEC_B"列转换为三列："chr"、"variable"（对应"A"或"B"区域）、"value"（对应百分比）
+HMEC_summary <- HMEC_summary %>%
+  mutate(chr = factor(row_number())) %>%
+  gather(variable, value, -chr)
+# Order chromosomes 使用aggregate函数对HMEC_summary（或TNBC_summary）按照"chr"列的值进行分组求和，以得到每个染色体的总和。然后按照总和值对染色体进行排序，并将排序后的染色体顺序应用到数据中，确保在绘图时染色体按照总和值的大小顺序排列
+chr_summary <- aggregate(HMEC_summary$value, by = list(HMEC_summary$chr), sum)
+HMEC_summary$chr <- factor(HMEC_summary$chr, levels = chr_summary$Group.1[order(chr_summary$x, decreasing = TRUE)])
+# define the plot parameters
+HMECsum.plot <- ggplot(HMEC_summary, aes(
+  x = chr, y = value,
+  fill = factor(variable, levels = c("HMEC_B", "HMEC_A"))
+)) +
+  geom_bar(stat = "identity")
+# plot the stacked bar plots
+HMECsum.plot + scale_fill_brewer(palette = "Spectral") + xlab("Chromosome") + ylab("Percent Compartment ID") + ggtitle("HMEC AB Compartments By Chromosome") + guides(fill = guide_legend(title = "ID Type"))
+ggsave(paste0("100kb_HMEC_vs_TNBC_HMEC_AB_ratio_per_chr_", padj_compartment_cutoff, ".pdf"), width = 7, height = 7)
+
+
+# TNBC summary stacked bar plots,同上
+# subset the summary file for just the TNBC relevant data
+TNBC_summary <- AB_summary[, c("chr", "TNBC_A", "TNBC_B")]
+# reformat the data to the preferred long format for the stacked bar plots. Also remove "chr" from chromosome names
+TNBC_summary <- TNBC_summary %>%
+  mutate(chr = factor(row_number())) %>%
+  gather(variable, value, -chr)
+# Order chromosomes
+chr_summary <- aggregate(TNBC_summary$value, by = list(TNBC_summary$chr), sum)
+TNBC_summary$chr <- factor(TNBC_summary$chr, levels = chr_summary$Group.1[order(chr_summary$x, decreasing = TRUE)])
+# define the plot parameters
+TNBCsum.plot <- ggplot(TNBC_summary, aes(
+  x = chr, y = value,
+  fill = factor(variable, levels = c("TNBC_B", "TNBC_A"))
+)) +
+  geom_bar(stat = "identity")
+# plot the stacked bar plots
+TNBCsum.plot + scale_fill_brewer(palette = "Spectral") + xlab("Chromosome") + ylab("Percent Compartment ID") + ggtitle("TNBC AB Compartments By Chromosome") + guides(fill = guide_legend(title = "ID Type"))
+ggsave(paste0("100kb_HMEC_vs_TNBC_TNBC_AB_ratio_per_chr_", padj_compartment_cutoff, ".pdf"), width = 7, height = 7)
+
+
+# compartment switches summary stacked bar plots including percent of regions that switched.
+conditions_summary <- AB_summary[, c("chr", "Percent_AA", "Percent_BB", "Percent_AB", "Percent_BA")]
+# reformat the data to the preferred long format for the stacked bar plots. Also remove "chr" from chromosome names
+conditions_summary <- conditions_summary %>%
+  mutate(chr = factor(row_number())) %>%
+  gather(variable, value, -chr)
+# Sort by largest-to-smallest switches
+# Proportions for any switch, to order chromosomes如果AB_BA为FALSE，则使用全部AB变化；否则，只使用AB和BA变化来计算显著结果，采用后者
+if (!AB_BA) {
+  # Use total AB changes for the genome-wide results
+  conditions_summary_AB_BA <- conditions_summary
+} else {
+  # Use only AB and BA changes for significant results
+  conditions_summary_AB_BA <- conditions_summary[conditions_summary$variable %in% c("Percent_AB", "Percent_BA"), ]
+}
+# Sum them up for any type of switch
+conditions_summary_AB_BA <- aggregate(conditions_summary_AB_BA$value, by = list(conditions_summary_AB_BA$chr), FUN = sum)
+colnames(conditions_summary_AB_BA) <- c("chr", "percent")
+# Order chromosomes
+conditions_summary$chr <- factor(conditions_summary$chr, levels = conditions_summary_AB_BA$chr[order(conditions_summary_AB_BA$percent, decreasing = TRUE)])
+# define the plot parameters
+conditions_AB <- ggplot(conditions_summary, aes(
+  x = chr, y = value,
+  fill = factor(variable, levels = c("Percent_BA", "Percent_AB", "Percent_BB", "Percent_AA"))
+)) +
+  geom_bar(stat = "identity")
+# plot the stacked bar plots
+conditions_AB + scale_fill_brewer(palette = "Spectral") + xlab("Chromosome") + ylab("Percent Compartment ID") + ggtitle("AB Compartment switches By Chromosome") + guides(fill = guide_legend(title = "ID Type"))
+ggsave(paste0("100kb_HMEC_vs_TNBC_AB_switches_per_chr_", padj_compartment_cutoff, ".pdf"), width = 7, height = 7)
+
+```
+
+```{r fig.height=6}
+#' Plot the proportion of a selected AB compartment change, 用的是AB_summary，所以还是过滤之后的，我命名成100kb_HMEC_vs_TNBC_4switchs_per_chr_，就是4种类型的switch占据chr的比例
+#' chromosomes sorted from larger to smaller fraction
+#' @param conditions conditions to visualize. Any combination of "Percent_AA", "Percent_BB", "Percent_AB", "Percent_BA"
+#' @param cols colors. Should be the same number as conditions
+plot_condition <- function(conditions = c("Percent_AA"), cols = "#99D594") {
+  # Select data
+  conditions_summary <- AB_summary[, c("chr", conditions)]
+  # Reformat into long form
+  condition_summary_long <- melt(conditions_summary, id = "chr")
+  condition_summary_long$chr <- factor(condition_summary_long$chr, levels = conditions_summary$chr[order(conditions_summary %>% dplyr::select(starts_with("Percent")) %>% apply(., 1, sum), decreasing = FALSE)])
+  # display.brewer.pal(7, "Spectral")
+  # brewer.pal(7, "Spectral")
+  p <- ggplot(condition_summary_long, aes(x = chr, y = value, fill = factor(variable))) +
+    geom_bar(stat = "identity") +
+    theme_bw() +
+    scale_fill_manual(values = cols) + 
+    ylab("Percent of the chromosome length") +
+    coord_flip()
+  p
+}
+#定义了一个名为 plot_condition 的函数，用于绘制染色体上特定 AB 区域变化的百分比。函数接受两个参数：conditions 和 cols。
+#conditions 参数是一个字符向量，用于指定要可视化的条件，可以是 "Percent_AA"、"Percent_BB"、"Percent_AB" 或 "Percent_BA" 中的任意组合。cols 参数是一个字符向量，用于指定绘图所用的颜色。
+#函数首先从 AB_summary 数据框中选择染色体和指定的条件列，并将其转换为长格式。然后，它对染色体进行排序，以便按照染色体的大小排列。最后，它使用 ggplot2 包绘制了堆叠柱状图，其中 x 轴表示染色体，y 轴表示百分比，fill 参数表示区域的标识（A 或 B）
+#下面就是这个函数具体的参数输入应用
+plot_AA <- plot_condition(conditions = c("Percent_AA"), cols = "#99D594")
+plot_BB <- plot_condition(conditions = c("Percent_BB"), cols = "#FC8D59")
+plot_AB <- plot_condition(conditions = c("Percent_AB"), cols = "#FEE08B")
+plot_BA <- plot_condition(conditions = c("Percent_BA"), cols = "#D53E4F")
+
+p<-grid.arrange(plot_AA, plot_BB, plot_AB, plot_BA, ncol = 2)
+#上面绘制的就是AA,AB,BA,BB等转换区域分别对应各自chr的比例,HMEC vs TNBC显著的区室转换中各种区室转换占据chr全长的比例
+ggsave(paste0("100kb_HMEC_vs_TNBC_4switchs_per_chr_", padj_compartment_cutoff, ".pdf"),p, width = 10, height = 7)
+```
+
+```{r fig.height=3.5, fig.width=5}
+# All conditions 这里实际上就是上一个代码块的整合4图,效果和690左右的AB Compartment switches By Chromosome没有什么区别
+plot_all <- plot_condition(conditions = c("Percent_AA", "Percent_BB", "Percent_AB", "Percent_BA"), cols = c("#99D594", "#FC8D59", "#FEE08B", "#D53E4F"))
+plot_all
+ggsave(paste0("100kb_HMEC_vs_TNBC_4switchs_all_per_chr_", padj_compartment_cutoff, ".pdf"), width = 7, height = 7)
+```
+
+# Piecharts of compartment switches 
+区室转换饼图+EV区室转换过程分布，用的都是padj过滤之后的数据
+
+```{r fig.height=6}
+# Get the number of compartments for each switch 生成饼图，展示不同切换类型（AA, AB, BB, BA）在数据集中所占比例的百分比，所以用的是bin，和当初自己使用homer绘制效果差不多
+sum_AA <- sum(AB_summary$Number_AA)
+sum_AB <- sum(AB_summary$Number_AB)
+sum_BB <- sum(AB_summary$Number_BB)
+sum_BA <- sum(AB_summary$Number_BA)
+slices <- c(sum_AA, sum_BB, sum_AB, sum_BA)
+
+# transform the counts to percentages for the legend 
+pct <- round(slices/sum(slices)*100, digits = 2)
+lbls <- c("Percent_AA", "Percent_BB", "Percent_AB", "Percent_BA")
+lbls <- paste(lbls, pct) # add percents to labels 
+lbls <- paste(lbls,"%",sep="") # add % to labels
+
+pie(slices,labels = lbls, col=rainbow(length(lbls)), init.angle = 70,
+   main="Compartment changes in HMEC & TNBC conditions, excluding non-changed regions")
+#ggsave(paste0("100kb_HMEC_vs_TNBC_compartment_changes_pie_", padj_compartment_cutoff, ".pdf"), width = 4.5, height = 4.5)
+```
+
+#Eigenvector distribution per compartment change这里就是对EV值，也就是前面使用的区室score进行了一个分布查看小提琴图，可以考虑使用
+
+```{r}
+aggregated_ev <- data.frame(Condition = c(rep("HMEC", nrow(AB_conditions_assigned)), rep("TNBC", nrow(AB_conditions_assigned))),
+                            EV = c(AB_conditions_assigned$HMECEV, AB_conditions_assigned$TNBCEV),
+                            Switch = c(AB_conditions_assigned$compartment, AB_conditions_assigned$compartment))
+
+ggplot(aggregated_ev, aes(x=Switch, y=EV, fill=Condition)) +
+  geom_violin(position=position_dodge(1)) +
+  geom_boxplot(width=0.1, position=position_dodge(1))
+ggsave(paste0("100kb_HMEC_vs_TNBC_Eigenvector_distribution_", padj_compartment_cutoff, ".pdf"),height = 7,width = 10)
+
+
+
+#考虑用其他画,但是呈现不出分组的效果
+#ggbetweenstats(data=aggregated_ev,
+#                x=Switch,  #或者是使用Condition
+#                y=EV,
+#               results.subtitle = FALSE,
+#              pairwise.display="all",
+#                title = "Eigenvector distribution per compartment across HMEC vs TNBC")
+#ggsave("100kb_HMEC_vs_TNBC_compartment_strength_Distribution.pdf", width = 7, height = 7)
+
+#使用下面这里的代码，但是缺一个p检验
+aggregated_ev %>%
+  dplyr::filter(Switch %in% c("AA", "BB", "AB","BA")) %>% 
+  grouped_ggbetweenstats(
+                #data=CSS,
+                x=Condition,  #或者是使用exp
+               y=EV, #这里如果使用原始的数据会非常大
+               grouping.var = Switch,
+               results.subtitle = TRUE,
+               pairwise.display="all",
+    outlier.tagging = TRUE,
+    ## 用于拼图的参数
+    annotation.args = list(title = "Eigenvector distribution per compartment switch across HMEC vs TNBC"),
+    plotgrid.args = list(nrow = 4) 
+  )
+ggsave("500kb_HMEC_vs_TNBC_compartment_switch_padj0.1_gg.pdf", width = 7, height = 15)
+
+#grouped_ggbetweenstats(data=aggregated_ev,
+#                x=Switch,
+#               y=EV,
+#                grouping.var =Condition)
+
+
+
+```
+
+# Genes and Gene Enrichments
+
+## Obtain the ranked genes to be used in GSEA
+
+Function obtained from `05_AB_eigenvector.Rmd`,略
+这个函数可以用于之后loop以及TAD层面上，寻找与结构区域变异切换范围的overlap即靶基因
+！！！！！！！！！！！！！！！！！！！！！！！！！！
+最终获得数据
+genes_XX类型_ranked使用的是padj过滤之后的靶基因数据
+genes_all_ranked使用的是没有padj过滤的靶基因数据
+```{r}
+# function to Find genes in AB or BA regions by detecting overlap between those regions and gene TSS sites in hg19 from above 区室切换与gene相互联系，实质上就是寻找区室切换的靶基因，寻找的是区室切换区域重叠的转录起始位点TSS
+
+#定义了一个函数
+#detect_genes_ranked 函数旨在通过检测AB或BA区域与hg19参考基因组中基因TSS位点之间的重叠来查找AB或BA区域中的基因。此函数接受一个包含区室切换范围的数据集 (rle_dataset)，并执行以下步骤：
+#将区室切换范围转换为 GRanges 对象。
+#检测与 hg19 参考基因的重叠。
+#提取重叠作为基因符号。
+#结合基因符号和区域。
+#使用 org.Hs.eg.db 数据库中的 bitr 函数获取基因名称。
+#按最大绝对特征向量差异进行聚合。
+#添加基因描述和生物类型。
+#重新排列列。
+#按最大到最小差异对基因进行排序。
+#返回数据集。
+detect_genes_ranked <- function(rle_dataset) {
+  # convert the compartment switch ranges to GRanges object，操作的对象就是AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "AA", ]等
+  rle_dataset.gr <- makeGRangesFromDataFrame(rle_dataset, seqnames.field = "chr", start.field = "start", end.field = "end", keep.extra.columns = TRUE)
+  # detect overlaps with hg19 reference genes,02脚本中因为symbol会重名，所以不建议使用这个，问题应该是出在genomewide.genes上！！！！！！！！！！！
+  rle_dataset_gene_olap <- findOverlaps(rle_dataset.gr, genomewide.genes)
+  # extract the overlaps as gene symbols，gene名称之类
+  rle_dataset_genes <- rle_dataset_gene_olap %>%
+    as.data.frame() %>%
+    # group_by(queryHits) %>%
+    mutate(genes = genomewide.genes$gene_id[subjectHits]) %>%
+    dplyr::select(queryHits, genes) %>%
+    distinct()
+  # temporary data frame containing the region data，gene坐标信息之类
+  tmpAB <- rle_dataset %>%
+    dplyr::select(chr, start, end, D.EV, switch) %>%
+    mutate(id = 1:nrow(rle_dataset))
+  # combine gene symbols and regions
+  rle_dataset_genes <- left_join(rle_dataset_genes, tmpAB, by = c("queryHits" = "id"))
+  # Get gene names
+  gene_symbols <- bitr(rle_dataset_genes$genes, fromType = "ENTREZID", toType = "SYMBOL", OrgDb = OrgDb)  #!!!!!!!
+  rle_dataset_genes <- left_join(rle_dataset_genes, gene_symbols, by = c("genes" = "ENTREZID"))
+  # Aggregate by maximum absolute Eigenvector difference
+  rle_dataset_genes <- aggregate(D.EV ~ SYMBOL, rle_dataset_genes, max)
+  # Append description
+  rle_dataset_genes <- left_join(rle_dataset_genes, gene_annotations, by = c("SYMBOL" = "symbol"))  
+  
+  #此处gene_annotations可以使用ensgene！！！！！！！！！！！！！
+  #另外一个就是rle_dataset_genes，需要使用两个对象——rle_dataset_genes和gene_symbols，gene_symbols可以使用bitr转换到ens，即"ENSEMBL"——rle_dataset_genes
+  
+  # rearrange the columns
+  rle_dataset_genes <- rle_dataset_genes[, c("SYMBOL", "D.EV", "description", "biotype")]
+  colnames(rle_dataset_genes)[1] <- "genes" # Rename the first column
+  # Order by largest to smallest difference
+  rle_dataset_genes <- rle_dataset_genes[order(rle_dataset_genes$D.EV, decreasing = TRUE), ]
+  # Return the dataset
+  rle_dataset_genes 
+}
+
+AB_conditions_assigned_subset <- AB_conditions_assigned[, c("HMECchr", "HMECstart", "TNBCend", "D.EV", "compartment")]
+colnames(AB_conditions_assigned_subset) <- c("chr", "start", "end", "D.EV", "switch")
+
+#注意，实际上这里已经返回了对应区室切换类型的gene
+genes_AA_ranked <- detect_genes_ranked(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "AA", ])
+genes_BB_ranked <- detect_genes_ranked(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "BB", ])
+genes_AB_ranked <- detect_genes_ranked(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "AB", ])
+genes_BA_ranked <- detect_genes_ranked(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "BA", ])
+
+# All regions
+AB_conditions_assigned_all_subset <- AB_conditions_assigned_all[, c("HMECchr", "HMECstart", "TNBCend", "D.EV", "compartment")]
+colnames(AB_conditions_assigned_all_subset) <- c("chr", "start", "end", "D.EV", "switch")
+
+genes_all_ranked <- detect_genes_ranked(AB_conditions_assigned_all_subset)
+```
+
+
+## Oncogene annotations
+癌基因的注释，主要是外部的数据
+#https://github.com/mdozmorov/Cancer_notes/blob/master/README.md对照文档仔细分析
+最终gene结果文件和上面无区别，只不过加了4个gene来源list的注释
+```{r}
+# Add onco annotations to the gene lists
+# Import PCAWG_C, PCAWG_N, COSMIC oncogene annotation lists将肿瘤基因注释添加到基因列表中。它导入了四个不同来源的肿瘤基因注释列表
+#https://github.com/mdozmorov/Cancer_notes/blob/master/README.md 这里有对应解释的各种gene数据的来源，总之都是收集来的cancer gene注释
+PCAWG_C <- read.table(file = "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/PCAWG_2020_PID_C_87_genes.txt", header = FALSE)
+PCAWG_N <- read.table(file = "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/PCAWG_2020_PID_N_93_genes.txt", header = FALSE)
+##The Pan-Cancer Analysis of Whole Genomes (PCAWG) study，全基因组泛癌症分析(PCAWG)研究是一项国际合作，旨在识别来自国际癌症基因组联盟的2600多个癌症全基因组的共同突变模式
+#来自 PCAWG 项目的肿瘤基因列表（Cohort）
+#来自 PCAWG 项目的肿瘤基因列表（Normal）
+
+COSMIC <- read.table(file = "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/COSMIC_genes.txt", header = FALSE)
+#Cancer Gene Census (CGC), download COSMIC
+BushmanLab <- read.table(file = "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/allOnco_May2018.tsv")
+#Cancer Gene Census (CGC), download COSMIC
+
+# function add the annotations to gene lists
+#标记数据集中的基因是否在这些列表中。然后，它将这些逻辑向量添加到数据集中作为新的列，并返回修改后的数据集
+#了解清楚这些gene list很重要
+add_onco <- function(dataset) {
+  # DEGs detected in COSMIC
+  degs_cosmic <- ifelse(dataset$genes %in% intersect(dataset$genes, COSMIC$V1), "Yes", "")
+  degs_bushman <- ifelse(dataset$genes %in% intersect(dataset$genes, BushmanLab$V1), "Yes", "")
+  # DEGs detected in PID-C set
+  degs_PID_C <- ifelse(dataset$genes %in% intersect(dataset$genes, PCAWG_C$V1), "Yes", "")
+  # DEGs detected in PID-N set
+  degs_PID_N <- ifelse(dataset$genes %in% intersect(dataset$genes, PCAWG_N$V1), "Yes", "")
+
+  # Attach these annotations
+  dataset <- data.frame(dataset, COSMIC = degs_cosmic, BushmanLab = degs_bushman, PID_C = degs_PID_C, PID_D = degs_PID_N)
+  # dataset <- dplyr::arrange(dataset, desc(COSMIC), desc(BushmanLab), desc(PID_C), desc(PID_D))
+}
+# add the gene lists 所以是区室转换中的gene+来自gene list 4个来源限制的gene注释
+genes_AA_ranked <- add_onco(genes_AA_ranked)
+genes_BB_ranked <- add_onco(genes_BB_ranked)
+genes_AB_ranked <- add_onco(genes_AB_ranked)
+genes_BA_ranked <- add_onco(genes_BA_ranked)
+
+genes_all_ranked <- add_onco(genes_all_ranked)
+```
+
+# Save the data
+
+Save the gene lists with differential eigenvector values sorted, will be used in GSEA analysis 
+要注意，最后保存的这一个文件，是一个多sheet的表格文件！！！！！！！！！！
+每一个sheet都是结果!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+```{r}
+# Write out AB and BA gene/compartment data to Xcel spreadsheets
+#文件在script6/HMEC_vs_TNBC_100kb_dchic/DifferentialResult/results/中，就是AB_gene_summary的xlsx表格文件
+if (rerun) {
+  x <- c(list(GenesAA = genes_AA_ranked), list(GenesBB = genes_BB_ranked), list(GenesAB = genes_AB_ranked), list(GenesBA = genes_BA_ranked), list(GenesAll = genes_all_ranked), list(Summary = AB_summary), list(EVs_and_Compartments = AB_conditions_assigned), list(RLE = ABrun_all))
+  write_xlsx(x, path = fileNameOut1)
+}
+
+#genes_AA_ranked，463行
+#genes_BB_ranked，168行
+#genes_AB_ranked，672行
+#genes_BA_ranked，431行
+#genes_all_ranked，22858行
+#AB_conditions_assigned，2340行
+#AB_conditions_assigned_all，28459行
+
+```
+
+
+# Save BED files
+
+The following format will use colors, https://www.biostars.org/p/269367/
+
+```
+track itemRgb=On								
+chr1	1000	2000	AB	0	.	1000	2000	167,203,104
+chr1	1500	2500	BB	0	.	1000	2000	242,51,16
+```
+
+- "chr", "start", "end" - coordinates
+- "compartment" - type of AB compartment change
+- "padj - difference in compartments
+- "." - strand 正负链
+- "thickStart" and "thickEnd" 
+- RGB colors
+    - AA - red, 255,0,0
+    - AB - orange, 255,165,0
+    - BA - light purple, 158,121,240
+    - BB - blue, 0,0,255
+这里保存的也是过滤之后的区室数据，主要是坐标之类的数据，使用的是padj矫正之后的AB_conditions_assigned数据
+要注意下面的score是padj的负对数，所以是越显著就是值越大
+另外需要注意的就是start以及end对应的是HMEC的数据，然后之后的thick之类的start以及end之类的数据对应的就是TNBC的数据
+要注意下面保存的文件就是
+"/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/HMEC_vs_TNBC_100kb_dchic/DifferentialResult/results/AB_100kb_0.1.bed"
+对照文件之后就会发现里面对应的就是区室的坐标信息之类的数据
+
+```{r}
+x <- data.frame(chr        = AB_conditions_assigned$HMECchr,
+                start      = AB_conditions_assigned$HMECstart,
+                end        = AB_conditions_assigned$HMECend,
+                name       = AB_conditions_assigned$compartment,
+                score      = -log10(AB_conditions_assigned$padj),
+                strand     = ".",
+                thickStart = AB_conditions_assigned$TNBCstart,
+                thickEnd   = AB_conditions_assigned$TNBCend,
+                color = ifelse(AB_conditions_assigned$compartment == "AA", "255,0,0",
+                               ifelse(AB_conditions_assigned$compartment == "AB", "255,165,0",
+                                      ifelse(AB_conditions_assigned$compartment == "BA", "158,121,240",
+                                             ifelse(AB_conditions_assigned$compartment == "BB", "0,0,255", ""))))
+)
+# Keep full numbers
+x$start <- format(x$start, scientific = FALSE, trim = TRUE, justify = "none")
+x$end   <- format(x$end, scientific = FALSE, trim = TRUE, justify = "none")
+x$thickStart <- format(x$thickStart, scientific = FALSE, trim = TRUE, justify = "none")
+x$thickEnd   <- format(x$thickEnd, scientific = FALSE, trim = TRUE, justify = "none")
+# Append header
+x <- rbind(c("track itemRgb=On", rep("", ncol(x) - 1)), x)
+# Save the BED file
+if (rerun) {
+  fwrite(round_df(x), file = fileNameOut2, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+}
+```
+
+## Summary and EV file
+下面算是一个对于之前代码处理过程中的所有文件中的数据以及变量的一个解释
+！！！！！！！！！！！！！！！！仔细对照
+
+**Summary:** Summary of per chromosome statistics. "chr"- chromosome number. 
+"PT_A" - Percent of chromosome in A compartment in primary tumor dataset.
+"PT_B" - Percent of chromosome in A compartment in primary tumor dataset. 
+原发肿瘤数据集中 A 组分的百分比 ("PT_A") 和 B 组分的百分比 ("PT_B")，实际上对应的就是HMEC
+
+"CR_A" - Percent of chromosome in A compartment in CR dataset. 
+"CR_B" - Percent of chromosome in A compartment in CR dataset. 
+化疗反应数据集中 A 组分的百分比 ("CR_A") 和 B 组分的百分比 ("CR_B"),实际上对应的就是TNBC
+
+
+"Percent_AA", "Percent_BB", "Percent_AB", and "Percent_BA" - percent of each chromosome that is in one of the four compartment switches between the two datasets. 
+每个染色体中属于四种区室切换类型的百分比,注意是切换区室占据chr的比例
+
+"AB_min", "AB_mean", "AB_max" - Min mean and max length of AB compartment per chromosome.
+每个染色体中 AB 区室的最小、平均和最大长度，注意是切换中的区室
+
+"BA_min", "BA_mean", "BA_max" - Min mean and max length of BA compartment per chromosome. 
+表示每个染色体中 BA 区室的最小、平均和最大长度，注意是去切换中的区室
+
+
+
+**EVs_and_Compartments** A summary of regions on each chromosome and their associated EV and compartment. For both PR and CR datasets. 注意是对应HMEC以及TNBC
+
+包含了每个染色体上区域的摘要信息，包括PR和CR数据集中的染色体 ("PRchr" 和 "CRchr")、区域的起始坐标 ("PRstart"、"PRend"、"CRstart" 和 "CRend")
+区域的EV值 ("PREV" 和 "CREV")、区域分配的区室 ("compartment")、EV值差异 ("D.EV") 和区室切换类型 ("switch")
+"PRchr" - chromosome in PR data. 
+"PRstart" - start coordinates of the region in PR dataset.
+"PRend" end coordinate of the region in the PR data. 
+"PREV" EV for the region in PR data. 
+"compartment" Either A or B, the assigned compartment for the region. 
+"CRchr" - chromosome in CR data.
+"CRstart" - start coordinates of the region in CR dataset.
+"CRend" end coordinate of the region in the CR data. 
+"CREV" EV for the region in CR data. 
+"compartment" Either A or B, the assigned compartment for the region. 
+"D.EV" the difference in the EV between datasets. Determined by CREV - PREV. 
+"switch" whether the region switched from A to A (AA), A to B (AB), A to A (AA), or B to B (BB).
+
+**RLE** - Summarizes the run length of regions and their associated switches.
+RLE (Run Length Encoding，运行长度编码)，摘要了区域的运行长度和与之关联的区室切换信息
+"lengths" - length of the run.  表示区域的长度
+"comparment" what compartment the region belongs to.表示区域所属的区室类型
+"start" start coordinate of the region.
+"end" coordinate of the region. 表示区域的起始和结束坐标
+"chr" chromosome that the region belongs to.  区域所属的染色体
+
+
+
+
+#前面保存的数据AB_gene_summary_100kb_0.1.xlsx，其中含有8个sheet，前面5个sheet所含有的gene id都是symbol的id   ，主要是对应symbol的gene id的统计信息，bed文件倒是没有gene id的信息，
+下面是使用ensemble的gene id转换之后的数据的统计信息
+！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+
+修改之后的使用ensemble的id的overlap函数，效果就看genes_BA_ranked中的id列
+detect_genes_ranked_ens 
+现在修改之后的genes实际上是ensemble的gene id
+
+
+#在进行修改之前还是要注意晚上一下gene的背景注释文件
+```{r}
+#对照原来的样本，新增了ensgene,symbol可以保留也可以不保留
+gene_annotations_ens <- grch37[!(grepl("_", grch37$chr) | grepl("GL", grch37$chr)), c("ensgene","symbol", "description", "biotype")]
+gene_annotations_ens <- gene_annotations_ens[!duplicated(gene_annotations_ens$ensgene) & !is.na(gene_annotations_ens$ensgene) & gene_annotations_ens$description != "", ]
+
+bsgenome <- "BSgenome.Hsapiens.UCSC.hg19"
+chrom.sizes <- data.frame(chr = chr, size = seqlengths(getBSgenome(genome = bsgenome, masked = FALSE))[chr])
+
+# Get all human genes
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+genomewide.genes_ens <- genes(TxDb.Hsapiens.UCSC.hg19.knownGene)
+genomewide.genes_ens <- keepSeqlevels(genomewide.genes_ens, c(paste0("chr", 1:22), "chrX"), pruning.mode = "tidy")
+gene_symbol_ens <- bitr(genomewide.genes_ens$gene_id, fromType = "ENTREZID", toType = "ENSEMBL", OrgDb = OrgDb)
+#ENTREZID  ENSEMBL gene_symbol_ens
+#ensgene symbol  gene_annotations_ens
+gene_symbol_ens <- left_join(gene_symbol_ens, gene_annotations_ens, by = c("ENSEMBL" = "ensgene"))
+#ENTREZID ENSEMBL symbol   gene_symbol_ens 
+#gene_id   genomewide.genes_ens
+gene_symbol_entrez_ens <- left_join(data.frame(gene_id = genomewide.genes_ens$gene_id), gene_symbol_ens, by = c("gene_id" = "ENTREZID"))
+#gene_id ENSEMBL symbol    gene_symbol_entrez_ens
+
+
+#gene_id   genomewide.genes_ens
+##gene_id ENSEMBL symbol    gene_symbol_entrez_ens
+#这里因为有些gene转换之间有损失，所以对应的赋值不能直接进行，只能依据gene id值之间的对应关系转换,同理后面的转换也是一样
+#genomewide.genes_ens$ensgene <- gene_symbol_entrez_ens$ENSEMBL  
+genomewide.genes_ens$ensgene <- gene_symbol_entrez_ens[genomewide.genes_ens$gene_id,"ENSEMBL"]
+genomewide.genes_ens$symbol <- gene_symbol_entrez_ens[genomewide.genes_ens$gene_id,"symbol"]
+genomewide.genes_ens$description <- gene_symbol_entrez_ens[genomewide.genes_ens$gene_id,"description"]     
+genomewide.genes_ens$biotype <- gene_symbol_entrez_ens[genomewide.genes_ens$gene_id,"biotype"] 
+
+#综上
+##ensgene symbol——gene_annotations_ens，平替gene_annotations
+##gene_id ensgene symbol  description——genomewide.genes_ens，平替genomewide.genes
+```
+
+
+算了，还是不试了，无论上面的注释有没有执行，最后获得的表格都是一样的，所以上面改动的还是不够（下面改动使用的是将上面注释之后再改动ens的，下面使用的注释等数据都使用上面更新的注释更替，但是还是不行，说明整个逻辑都有问题）
+最后就是这样
+总之如果要使用ens的gene id的，上面的注释可以不改动，直接进行下面的代码操作
+
+```{r}
+detect_genes_ranked_ens <- function(rle_dataset) {
+  rle_dataset.gr <- makeGRangesFromDataFrame(rle_dataset, seqnames.field = "chr", start.field = "start", end.field = "end", keep.extra.columns = TRUE)
+  rle_dataset_gene_olap <- findOverlaps(rle_dataset.gr, genomewide.genes)
+  #下面存gene，对应的id中只有entrz中是无缺失值的，其他的gene id都是有NA值的
+  rle_dataset_genes <- rle_dataset_gene_olap %>%
+    as.data.frame() %>%
+    mutate(genes = genomewide.genes$gene_id[subjectHits]) %>%
+    dplyr::select(queryHits, genes) %>%
+    distinct()
+  #上面使用的gene id还是entrez id，如果使用ensgene的话会有NA值，虽然可以直接去重
+  tmpAB <- rle_dataset %>%
+    dplyr::select(chr, start, end, D.EV, switch) %>%
+    mutate(id = 1:nrow(rle_dataset))
+  rle_dataset_genes <- left_join(rle_dataset_genes, tmpAB, by = c("queryHits" = "id"))
+  #因为上面查询用的还是genomewide.genes_ens$gene_id，而不是ensgene，所以下面的from还是entrez
+  gene_symbols <- bitr(rle_dataset_genes$genes, fromType = "ENTREZID", toType = "ENSEMBL", OrgDb = OrgDb)  #!!!!!!!
+  rle_dataset_genes <- left_join(rle_dataset_genes, gene_symbols, by = c("genes" = "ENTREZID"))
+  # Aggregate by maximum absolute Eigenvector difference
+  rle_dataset_genes <- aggregate(D.EV ~ ENSEMBL, rle_dataset_genes, max)
+  # Append description
+  rle_dataset_genes <- left_join(rle_dataset_genes, gene_annotations, by = c("ENSEMBL" = "ensgene"))  #右边或者是ens或者是symbol
+  rle_dataset_genes <- rle_dataset_genes[, c("ENSEMBL", "D.EV", "description", "biotype")]
+  colnames(rle_dataset_genes)[1] <- "genes" # Rename the first column
+  # Order by largest to smallest difference
+  rle_dataset_genes <- rle_dataset_genes[order(rle_dataset_genes$D.EV, decreasing = TRUE), ]
+  # Return the dataset
+  rle_dataset_genes 
+}
+
+
+#下面的代码可以不用执行，因为操作过程中不涉及到gene id，可以symbol和ens通用
+AB_conditions_assigned_subset <- AB_conditions_assigned[, c("HMECchr", "HMECstart", "BT549end", "D.EV", "compartment")]
+colnames(AB_conditions_assigned_subset) <- c("chr", "start", "end", "D.EV", "switch")
+
+
+genes_AA_ranked_ens <- detect_genes_ranked_ens(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "AA", ])
+genes_BB_ranked_ens <- detect_genes_ranked_ens(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "BB", ])
+genes_AB_ranked_ens <- detect_genes_ranked_ens(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "AB", ])
+genes_BA_ranked_ens <- detect_genes_ranked_ens(AB_conditions_assigned_subset[AB_conditions_assigned_subset$switch == "BA", ])
+
+
+
+# All regions，这里对应的是没有使用padj过滤的所有dchic的区室信息，下面这段代码也是公用的，也可以不执行
+AB_conditions_assigned_all_subset <- AB_conditions_assigned_all[, c("HMECchr", "HMECstart", "BT549end", "D.EV", "compartment")]
+colnames(AB_conditions_assigned_all_subset) <- c("chr", "start", "end", "D.EV", "switch")
+
+#下面的同样换成ens的
+genes_all_ranked_ens <- detect_genes_ranked_ens(AB_conditions_assigned_all_subset)
+```
+
+#经过上面的代码转换：目前手头有
+ens geneid的：
+未padj过滤的genes_all_ranked_ens
+经padj过滤的genes_AA_ranked_ens等4类
+
+symbol geneid的：
+未padj过滤的genes_all_ranked
+经padj过滤的genes_all_ranked等4类
+
+#因为oncogene那一块使用的gene list是symbol，虽然可以转换为ens的id，但是比较麻烦，
+所以此处ens id的就不转换了
+
+
+# Save the data
+
+Save the gene lists with differential eigenvector values sorted, will be used in GSEA analysis 
+要注意，最后保存的这一个文件，是一个多sheet的表格文件！！！！！！！！！！
+每一个sheet都是结果!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+```{r}
+# Write out AB and BA gene/compartment data to Xcel spreadsheets
+#文件在script6/HMEC_vs_BT549_100kb_dchic/DifferentialResult/results/中，就是AB_gene_summary的xlsx表格文件,现在是改版的ens
+  x <- c(list(GenesAA = genes_AA_ranked_ens), list(GenesBB = genes_BB_ranked_ens), list(GenesAB = genes_AB_ranked_ens), list(GenesBA = genes_BA_ranked_ens), list(GenesAll = genes_all_ranked_ens), list(Summary = AB_summary), list(EVs_and_Compartments = AB_conditions_assigned), list(RLE = ABrun_all))
+  write_xlsx(x, path =file.path(dir_results, paste0("AB_gene_summary_", res_text,"_", padj_compartment_cutoff, "_ens.xlsx")))
+ 
+
+#genes_AA_ranked，363行，现在ens是374行
+#genes_BB_ranked，443行，ens是456行
+#genes_AB_ranked，1499行，ens是1546行
+#genes_BA_ranked，840行，ens是855
+#genes_all_ranked，22858行，ens是23945行
+#AB_conditions_assigned，4188行
+#AB_conditions_assigned_all，28466行
+
+```
+
+# Save BED files
+```{r}
+x <- data.frame(chr        = AB_conditions_assigned$HMECchr,
+                start      = AB_conditions_assigned$HMECstart,
+                end        = AB_conditions_assigned$HMECend,
+                name       = AB_conditions_assigned$compartment,
+                score      = -log10(AB_conditions_assigned$padj),
+                strand     = ".",
+                thickStart = AB_conditions_assigned$BT549start,
+                thickEnd   = AB_conditions_assigned$BT549end,
+                color = ifelse(AB_conditions_assigned$compartment == "AA", "255,0,0",
+                               ifelse(AB_conditions_assigned$compartment == "AB", "255,165,0",
+                                      ifelse(AB_conditions_assigned$compartment == "BA", "158,121,240",
+                                             ifelse(AB_conditions_assigned$compartment == "BB", "0,0,255", ""))))
+)
+# Keep full numbers
+x$start <- format(x$start, scientific = FALSE, trim = TRUE, justify = "none")
+x$end   <- format(x$end, scientific = FALSE, trim = TRUE, justify = "none")
+x$thickStart <- format(x$thickStart, scientific = FALSE, trim = TRUE, justify = "none")
+x$thickEnd   <- format(x$thickEnd, scientific = FALSE, trim = TRUE, justify = "none")
+# Append header
+x <- rbind(c("track itemRgb=On", rep("", ncol(x) - 1)), x)
+# Save the BED file,同样这里是有ens标注的
+fwrite(round_df(x), file = file.path(dir_results, paste0("AB_", res_text, "_", padj_compartment_cutoff, "_ens.bed")), quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+
+```
+
+
+#下面绘制显著区室转换区域的桑基图/冲击图
+显著区室转换gene使用AB_summary的数据
+```{r}
+library(ggalluvial)
+#load data 
+AB_sig <- read.csv("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/AB_newcool/dchic/Fig5_HiC_ABcompartments/100kb_HMEC_vs_TNBC_AB_summary.csv")
+AB_sig_number <- AB_sig[,c("chr","Number_AA","Number_BB","Number_AB","Number_BA")]
+sums_chr <- colSums(AB_sig_number[, -1], na.rm = TRUE)
+sums_chr <- c("chrSUM",sums_chr)
+AB_sig_number <- rbind(AB_sig_number,sums_chr)  #按照row合并
+
+#构建用于绘制冲击图的数据框
+chrSUM_row <- filter(AB_sig_number, chr == "chrSUM")
+chrSUM_df <- data.frame(
+  HMEC = c("A", "A", "B", "B"),
+  TNBC = c("A", "B", "A", "B"),
+  switchType=c("AA","AB","BA","BB"),
+  switchN = c(chrSUM_row$Number_AA, chrSUM_row$Number_AB, chrSUM_row$Number_BA, chrSUM_row$Number_BB)
+)
+
+write.csv(chrSUM_df,"ABswitchN_sum_sig.csv", row.names = FALSE)
+
+p <- ggplot(data=chrSUM_df,
+  aes(y=switchN,axis1=HMEC,axis2=TNBC,fill=switchType))+
+  geom_alluvium()+
+  geom_stratum() +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)))
+  
+ggplot(chrSUM_df,
+       aes(x = survey, stratum = response, alluvium = subject,
+           y = freq,
+           fill = response, label = response)) +
+        scale_x_discrete(expand = c(.1, .1)) +
+        geom_flow() +
+        geom_stratum(alpha = .5) +
+        geom_text(stat = "stratum", size = 3) +
+        theme(legend.position = "none") +
+        ggtitle("vaccination survey responses at three points in time")
+
+```
+   
+
+

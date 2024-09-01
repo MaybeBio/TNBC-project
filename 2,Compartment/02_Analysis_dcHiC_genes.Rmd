@@ -1,0 +1,1292 @@
+####### dchic中使用2 vs 5rep的数据
+#######下面开始就是dchic中2 vs 5rep的归类分析，即HMEC vs TNBC
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+# Set up the environment
+library(knitr)
+opts_chunk$set(cache.path='cache/', fig.path='img/', cache=F, tidy=T, fig.keep='high', echo=F, dpi=100, warnings=F, message=F, comment=NA, warning=F, results='as.is', fig.width = 10, fig.height = 6) #out.width=700, 
+library(pander)
+panderOptions('table.split.table', Inf)
+set.seed(1)
+library(dplyr)
+options(stringsAsFactors = FALSE)
+```
+
+# Libraries
+
+```{r libraries}
+library(readxl)
+library(readr)
+library(reshape2)
+library(ggplot2)
+library(ggrepel)
+library(RColorBrewer)
+library(VennDetail)
+library(annotables)
+library("ggsci")
+library(scales)
+# scales::show_col(pal_lancet("lanonc")(8))
+mycols = pal_lancet("lanonc")(8)
+library(patchwork)
+library(clusterProfiler)
+#BiocManager::install("clusterProfiler")
+#devtools::install_github("YuLab-SMU/enrichplot")
+library(enrichplot)
+organism = "org.Hs.eg.db"
+library(organism, character.only = TRUE)
+library(DOSE)
+```
+
+# Settings
+关注阈值设置，padj还是按照01脚本dchic的默认设置0.1来
+其他GSEA数据库就设置为0.05暂时
+
+```{r}
+# General settings
+# Cutoff for significant AB compartment changes此处承接dchic 01脚本分析，还是使用dchic默认的阈值设置为0.1，后续可以改进！！！！！！！！！！！！！！
+padj_compartment_cutoff <- 1   #本来是0.1，之后为了处理全局的数据还是修改为1
+
+#下面这两个阈值不知道如何设置，暂时设置成常规0.05default，至于要不要用看后面！！！！
+# Cutoff for significant KEGG enrichment  
+padj_kegg_cutoff <- 0.05 #原代码是1，此处手动改成了0.05
+# Cutoff for significant MSigDb enrichment 分子特征数据库(MSigDB)
+padj_msigdb_cutoff <- 0.05
+```
+
+```{r}
+# dcHiC analysis settings
+dir_data <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/HMEC_vs_TNBC_100kb_dchic/DifferentialResult/"
+#fileNameIn1 <- "HMEC_TNBC_100Kb/fdr_result/differential.intra_sample_group.Filtered.pcOri.bedGraph" #filtered results，效果相当于下面的in2+padj阈值0.1，为了之后可以随时修改阈值检查效果方便，下面一切分析都使用in2
+#因为下面要使用01脚本中获得的文件summary，所以此处in1设置不同名
+fileNameIn2 <- "HMEC_TNBC_100Kb/fdr_result/differential.intra_sample_group.pcOri.bedGraph" # Full results，以这个文件为主，设置阈值去筛选
+
+# Resolution
+res_number <- 100000
+res_text <- "100kb"
+# Results folder
+dir_results <- file.path(dir_data, "results")
+dir.create(dir_results, recursive = TRUE) # Create if does not exist
+
+fileNameIn1 <- file.path(dir_results, paste0("AB_gene_summary_", res_text,"_", padj_compartment_cutoff, ".xlsx"))
+
+# Figures
+fileNameOut1 <- file.path(dir_results, "HMECTNBC_AA_RNAseq.pdf")
+fileNameOut2 <- file.path(dir_results, "HMECTNBC_BB_RNAseq.pdf")
+fileNameOut3 <- file.path(dir_results, "HMECTNBC_AB_RNAseq.pdf")
+fileNameOut4 <- file.path(dir_results, "HMECTNBC_BA_RNAseq.pdf")
+fileNameOut5 <- file.path(dir_results, "HMECTNBC_all_RNAseq.pdf")
+fileNameOut6 <- file.path(dir_results, "HMECTNBC_ABC_RNAseq.pdf") #此处是特殊通路注释之后的输出，暂时先验未知
+
+#注意上面保存的是区室vs全部gene的趋势，下面这里都后缀添加了个2，绘制的是区室vs DEG的趋势
+fileNameOut12 <- file.path(dir_results, "HMECTNBC_AA_DEG_RNAseq.pdf")
+fileNameOut22 <- file.path(dir_results, "HMECTNBC_BB_DEG_RNAseq.pdf")
+fileNameOut32 <- file.path(dir_results, "HMECTNBC_AB_DEG_RNAseq.pdf")
+fileNameOut42 <- file.path(dir_results, "HMECTNBC_BA_DEG_RNAseq.pdf")
+fileNameOut52 <- file.path(dir_results, "HMECTNBC_all_DEG_RNAseq.pdf")
+
+```
+
+
+Bulk TNBC vs HMEC，实际上RNA-seq那块DEG做的是HMEC vs TNBC的全部DEG，反正都可以使用
+理论上使用的是RNA-seq分析模块中03的GSEA_edge脚本的输出DEG注释，即文件DEGs_edgeR_HMEC_TNBC_annotated.xlsx
+但是实际上对于DEG分析那一块处理的只有01+02脚本，所以得到的文件就只有
+全部的DEG数据list：edgeR_HMEC_vs_TNBC_FDR0.05_logFC1_DEG.csv，这个数据与理论上的03脚本中的注释处理&且用在区室该处的数据还差一点
+所以按照DEG分析那块将脚本重新跑了一次，将原本的DEG输出修缮成了原本应该用在此处区室分析中的DEG数据，即edgeR_HMEC_vs_TNBC_FDR0.05_logFC1_DEG.csv
+总之"/mnt/disk4/haitao/bysj_seu/geo_data/hic/script8/RNA/ens_fa_gtf/DEG/edgeR_HMEC_vs_TNBC_FDR0.05_logFC1_DEG_annotated.xlsx"或者edgeR_HMEC_vs_TNBC_FDR0.05_logFC1_DEG.csv都可以使用
+```{r settings}
+# Differentially expressed genes，2者都能用
+fileNameIn3 <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script8/RNA/ens_fa_gtf/DEG/edgeR_HMEC_vs_TNBC_FDR0.05_logFC1_DEG_annotated.xlsx"
+
+# Gene annotations
+gene_annotations <- grch37[ !(grepl("_", grch37$chr) | grepl("GL", grch37$chr)), c("ensgene", "symbol", "biotype", "description")]
+gene_annotations <- gene_annotations[ !duplicated(gene_annotations) & !is.na(gene_annotations$symbol) & gene_annotations$description != "", ]
+```
+
+# Load data
+首先要分析一下gene id重名的原因
+1，可能是上游gene overlap计算的算法问题，查看genes_AA_full》filenamein1》AB_gene_summary_100kb_0.1.xlsx》01脚本中问题》detect_genes_ranked
+01脚本135行左右any(duplicated(genomewide.genes$symbol))是T，说明本身hg19基因组上如果只是看symbol的话，不同chr肯定确实有重的情况；如果还是要用symbol，而且要做upset图
+（1），搞清楚原始的上面的genes_AA等文件中id至少在数量上是不是一致的，虽然名字可能会重——要看算法
+（2），如果数目上是一致的，那就如果还是用symbol，就将01脚本中上游的genomewide.genes$symbol去处重复，虽然会少，但是微不足道；如果不用symbol，那就改用其他gene id，那就修改算法部分overlap；或者不画upset图，只要是1确认的，就直接拿这部分gene来做
+
+2，可能是ucsc本身的gene id就可能会重名问题，这里使用的是gene symbol，所以会有重名，建议是在01脚本中使用ens等
+
+
+现在已经纠正回来了，可以在上游的filesnamein1里修改是使用ens作为id的数据，还是使用原始symbol的数据
+之后有需求可以修改回来！！！！！！！！！！！！！！！！！
+但是不幸的是，即使是上游修改成了ens作为gene id的数据，最后还是会有交集，
+应该是算法中注释数据原始是使用symbol id的，应该修改一下上游的id
+
+发现还是不行，上游的ens的文件获取还是不干净，有时间可以将算法以及上游注释再看一遍，然后从头开始修改
+因为无论是ens id还是symbol的id，都有重复值，又暂时没处理干净
+而且原代码脚本又是以ens id为主的，
+所以后续还是使用symbol的文件，
+等有空了再检查代码修改回来！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+
+
+```{r data}
+# Compartment data
+mtx_full <- read_tsv(file.path(dir_data, fileNameIn2)) # Full，未经过padj 0.1的过滤筛选
+# Process compartment data
+mtx_filtered <- mtx_full[mtx_full$padj <= padj_compartment_cutoff, ] #这相当于是dchic原始padj 0.1的输出的区室数据文件
+mtx_filtered$compartment <- ifelse(mtx_filtered$HMEC > 0 & mtx_filtered$TNBC > 0, "AA", 
+                                   ifelse(mtx_filtered$HMEC <= 0 & mtx_filtered$TNBC <= 0, "BB",
+                                          ifelse(mtx_filtered$HMEC > 0 & mtx_filtered$TNBC <= 0, "AB", "BA")))
+
+# Genes data，注意这里是01脚本处理得到的含有区室统计信息的所sheet的表格
+genes_AA_full <- read_xlsx(fileNameIn1, sheet = 1)
+genes_BB_full <- read_xlsx(fileNameIn1, sheet = 2)
+genes_AB_full <- read_xlsx(fileNameIn1, sheet = 3)
+genes_BA_full <- read_xlsx(fileNameIn1, sheet = 4)
+genes_all_full <- read_xlsx(fileNameIn1, sheet = 5)
+# Process gene data，因为上游01脚本中使用的是ucsc的ref基因组信息，所以对应的gene信息中可能会有一些是重合的注释id
+#！！！！！！！！！！！！！！！！！！！！！！！
+#首先是检查不同list集合之间的交集
+genes_AA <- unique(genes_AA_full$genes)
+genes_BB <- unique(genes_BB_full$genes)
+genes_AB <- unique(genes_AB_full$genes)
+genes_BA <- unique(genes_BA_full$genes)
+
+
+# 计算两两集合的交集
+intersection_AA_AB <- intersect(genes_AA, genes_AB)
+intersection_AA_BB <- intersect(genes_AA, genes_BB)
+intersection_AA_BA <- intersect(genes_AA, genes_BA)
+intersection_AB_BB <- intersect(genes_AB, genes_BB)
+intersection_AB_BA <- intersect(genes_AB, genes_BA)
+intersection_BB_BA <- intersect(genes_BB, genes_BA)
+# 打印输出交集结果
+print(intersection_AA_AB)
+#[1] "CRYBB1"   "TFIP11"   "ALDH1A2"  "APP"      "LIPE-AS1" "MYH10"    "MAMDC2"   "FRMPD1"   "CGNL1"    "GCOM1"    "OTOA"     "POLR2M"  
+#[13] "SCNN1G"   "USP31"    "SKAP2"    "MAP3K21"  "RAD51AP2" "LEF1"     "PLXNA2"   "GZMA"     "GLUD1P2"  "PTPN20"   "IRAK3"    "WIF1"    
+#[25] "TCHH"     "SUGCT"    "DNAH8"    "ARL15"    "MSRB3"    "ANKRD31"  "IL26"     "NMNAT3"   "FRAS1"    "HMGA2"    "RPSAP52"  "EDAR"    
+#[37] "DGKG"    
+print(intersection_AA_BB)
+#[1] "ARRDC3-AS1" "MYH10" 
+print(intersection_AA_BA)
+# [1] "HLTF"     "KYNU"     "ARHGAP24" "HECW2"    "DPYD"     "STAG1"    "ZEB2"     "MAPRE2"   "ZNF438"   "STK17B"   "ARID1B"   "PGAP1"   
+#[13] "ANKRD44"  "CAMK1D"   "MIR924HG" "ANKAR"    "PMS1"     "DTNA"     "MEFV"     "ALG1"     "C16orf89" "RTTN"  
+print(intersection_AB_BB)
+# [1] "NLK"      "MYH10"    "SYN3"     "ARHGAP20" "TENM4"    "ABCA13"   "DNAH14"   "SOX2-OT"  "ASTN1"    "SULT1B1" 
+print(intersection_AB_BA)
+#无，这才正常
+print(intersection_BB_BA)
+# [1] "FAM171B"   "PDE4B"     "ARHGAP15"  "STPG2"     "ADGRV1"    "LRP1B"     "COL24A1"   "CPA3"      "DNAH7"     "SNTG1"     "LEPR"     
+#[12] "LEPROT"    "ZMAT4"     "FAF1"      "FAT4"      "MGAT4C"    "MSC-AS1"   "GULP1"     "LINC02398" "AUTS2"     "TGFBR3"    "LINC00639"
+#[23] "ARHGEF9"   "BRD1"  
+
+
+
+# DEGs data,读入的数据实际上已经经过了FDR的筛选，所以只要进一步筛选logFC值即可筛选出up以及down基因。但是后面查看区室vs表达的时候使用的是degs_full是未分出差异表达的全部gene，所以下面的数据还是修改一下；使用degs作为全部DEG，使用degs_full作为全部gene包括DEG，这里读取的应该是DEG处理之前的全部gene，按照源代码使用的是全部的sheet1中的gene（实际上是在DEG筛选之前的全部gene中的蛋白编码gene）
+#下面读取的是在DEG处理之前的全部的gene数据，同样在RNA-seq脚本中经过了稍微处理
+degs_full <- read_xlsx("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script8/RNA/ens_fa_gtf/DEG/edgeR_HMEC_vs_TNBC_FDR0.05_logFC1_all_annotated.xlsx")
+# Filter significant，FDR的0.05已经做过了，这里读取的才是经过FDR过滤之后的DEG
+degs <- read_xlsx(fileNameIn3)
+# Process DEGs data，这里修改之后的数据gene事迹上是symbol，可以修改回ens id
+degs_UP <- degs$genes[degs$logFC > 1]
+degs_DN <- degs$genes[degs$logFC <= 1]
+```
+
+# Genes and AB compartment change stats
+下面使用的是经过padj过滤之后的区室数据
+
+```{r fig.height=2}
+compartment_gene_summary <- as.data.frame(table(mtx_filtered$compartment))
+colnames(compartment_gene_summary) <- c("Type", "Compartment")
+compartment_gene_summary$Gene <- c(length(genes_AA), length(genes_AB), length(genes_BA), length(genes_BB))
+pander(compartment_gene_summary)
+
+#---------------------------效果如下
+# Type   Compartment   Gene 
+#------ ------------- ------
+#  AA        355       462  
+#
+#  AB       1081       672  
+#
+#  BA        501       431  
+#
+#  BB        403       168  
+#---------------------------
+
+compartment_gene_summary_long <- melt(compartment_gene_summary, id = "Type") #将宽格式的数据框 compartment_gene_summary 转换为长格式
+colnames(compartment_gene_summary_long) <- c("Switch", "Type", "Number")
+#Switch Type Number实际效果
+##Switch Type Number
+#AA	Compartment	355		
+#AB	Compartment	1081		
+#BA	Compartment	501		
+#BB	Compartment	403		
+#AA	Gene	462		
+#AB	Gene	672		
+#BA	Gene	431		
+#BB	Gene	168	
+
+
+# display.brewer.pal(7, "Spectral")
+# brewer.pal(7, "Spectral")
+# ggplot(compartment_gene_summary_long, aes(x = Type, y = Number, group = Switch)) +
+#   geom_bar(stat = "identity", position = "dodge", aes(fill = Switch)) +
+#   theme_bw() +
+#   scale_fill_manual(values = mycols[1:4])  +
+#   facet_wrap(Type ~ .)
+
+p1 <- ggplot(compartment_gene_summary_long %>% filter(Type == "Compartment"), aes(x = Switch, y = Number, group = Switch)) +
+  geom_bar(stat = "identity", position = "dodge", aes(fill = Switch)) +
+  theme_bw() +
+  scale_fill_manual(values = mycols[1:4])  +
+  ggtitle("Compartment switch counts")
+#筛选出 Type 列为 "Compartment" 的行。然后指定了x轴为 Switch，y轴为 Number，并根据 Switch 列进行分组
+#实际上筛选的就是对应类型转换的区室bin（显著）
+#区室颜色就4种，所以使用1-4
+
+p2 <- ggplot(compartment_gene_summary_long %>% filter(Type == "Gene"), aes(x = Switch, y = Number, group = Switch)) +
+  geom_bar(stat = "identity", position = "dodge", aes(fill = Switch)) +
+  theme_bw() +
+  scale_fill_manual(values = mycols[1:4])  +
+  ggtitle("Overlapping gene counts")
+
+p1 + p2
+ggsave("100kb_HMEC_vs_TNBC_gene&AB_stats.pdf", width = 10, height = 7)
+```
+
+# Gene overlap
+因为01脚本中使用的是ucsc的id，应该是symbol，所以在upset中展示的时候会有不同区室之间的交集，可以后期自己过滤一下，或者是使用ens的注释以及ref基因组信息
+
+
+```{r}
+ven <- venndetail(list(AA = genes_AA, BB = genes_BB, AB = genes_AB, BA = genes_BA))
+plot(ven, type = "upset")
+#ggsave("100kb_HMEC_vs_TNBC_geneoverlap_upset.pdf", p,width = 7, height = 7),直接手动保存
+#plot(ven,type="venn")
+plot(ven, type = "vennpie")
+#factor(ven$Subset)   Levels: AA AA_AB AA_BA AA_BB AA_BB_AB AB BA BB BB_AB BB_BA
+```
+
+下面就是矫正，因为原始数据的问题，导致gene之间有交集
+Levels: AA AA_AB AA_BA AA_BB AA_BB_AB AB BA BB BB_AB BB_BA
+对于padj1的数据，则不用另外记录交集部分gene数据了
+
+## Genes in AA and AB
+
+```{r}
+result_AA_AB <- left_join(data.frame(symbol = getSet(ven, subset = "AA_AB")$Detail %>% sort),
+          gene_annotations, by = c("symbol")) %>% dplyr::select(c("symbol", "biotype", "description")) 
+write.csv(result_AA_AB, "100kb_HMEC_vs_TNBC_AA_AB.csv", row.names = FALSE)
+```
+
+## Genes in AA and BA
+
+```{r}
+result_AA_BA <- left_join(data.frame(symbol = getSet(ven, subset = "AA_BA")$Detail %>% sort),
+          gene_annotations, by = c("symbol")) %>% dplyr::select(c("symbol", "biotype", "description")) 
+write.csv(result_AA_BA, "100kb_HMEC_vs_TNBC_AA_BA.csv", row.names = FALSE)
+```
+
+
+
+## Genes in AA and BB
+
+```{r}
+result_AA_BB <- left_join(data.frame(symbol = getSet(ven, subset = "AA_BB")$Detail %>% sort),
+          gene_annotations, by = c("symbol")) %>% dplyr::select(c("symbol", "biotype", "description")) 
+write.csv(result_AA_BB, "100kb_HMEC_vs_TNBC_AA_BB.csv", row.names = FALSE)
+```
+
+
+
+
+## Genes in AA_BB_AB
+
+```{r}
+result_AA_BB_AB <- left_join(data.frame(symbol = getSet(ven, subset = "AA_BB_AB")$Detail %>% sort),
+          gene_annotations, by = c("symbol")) %>% dplyr::select(c("symbol", "biotype", "description")) %>% pander
+```
+
+## Genes in BB and AB
+
+```{r}
+result_BB_AB <- left_join(data.frame(symbol = getSet(ven, subset = "BB_AB")$Detail %>% sort),
+          gene_annotations, by = c("symbol")) %>% dplyr::select(c("symbol", "biotype", "description")) 
+write.csv(result_BB_AB, "100kb_HMEC_vs_TNBC_BB_AB.csv", row.names = FALSE)
+```
+
+## Genes in BB and BA
+
+```{r}
+result_BB_BA <- left_join(data.frame(symbol = getSet(ven, subset = "BB_BA")$Detail %>% sort),
+          gene_annotations, by = c("symbol")) %>% dplyr::select(c("symbol", "biotype", "description")) 
+write.csv(result_BB_BA, "100kb_HMEC_vs_TNBC_BB_BA.csv", row.names = FALSE)
+```
+
+
+
+
+# Overlap with DEGs
+
+## Upregulated genes
+
+```{r}
+print(paste("Total upregulated:", length(degs_UP))) #477
+# Intersect with 
+ven <- venndetail(list(AA = genes_AA, BB = genes_BB, AB = genes_AB, BA = genes_BA, UP = degs_UP))
+plot(ven,type="upset")
+plot(ven,type="vennpie")
+
+print(paste("Upregulated, no overlap with AB compartment change:", length(getSet(ven, subset = "UP")$Detail))) #451
+#即总共477个上调gene中一共有451个是与区室转换无关的，不太符合我的预期
+# Table summary of overlaps
+ven_summary <- table(result(ven)$Subset) %>% as.data.frame()
+colnames(ven_summary) <- c("Subset", "Number")
+# Compartments overlapping with DEGs
+ven_summary[grepl("_UP", ven_summary$Subset), ] %>% pander()
+
+AB_onlyUP_all <- left_join(getSet(ven, subset = ven_summary$Subset[grepl("_UP", ven_summary$Subset)]), 
+          gene_annotations, by = c("Detail" = "symbol")) %>% dplyr::select(c("Subset", "Detail", "biotype", "description")) 
+write.csv(AB_onlyUP_all, "100kb_HMEC_vs_TNBC_UPoverlap_gene.csv", row.names = FALSE)
+```
+
+## Downregulated genes
+
+```{r}
+print(paste("Total downregulated:", length(degs_DN))) #788
+# Intersect with 
+ven <- venndetail(list(AA = genes_AA, BB = genes_BB, AB = genes_AB, BA = genes_BA, DN = degs_DN))
+plot(ven,type="upset")
+plot(ven,type="vennpie") 
+
+print(paste("Downregulated, no overlap with AB compartment change:", length(getSet(ven, subset = "DN")$Detail))) #690
+# Table summary of overlaps
+ven_summary <- table(result(ven)$Subset) %>% as.data.frame()
+colnames(ven_summary) <- c("Subset", "Number")
+# Compartments overlapping with DEGs
+ven_summary[grepl("_DN", ven_summary$Subset), ] %>% pander()
+
+AB_onlyDN_all <- left_join(getSet(ven, subset = ven_summary$Subset[grepl("_DN", ven_summary$Subset)]), 
+          gene_annotations, by = c("Detail" = "symbol")) %>% dplyr::select(c("Subset", "Detail", "biotype", "description")) %>% pander
+write.csv(AB_onlyDN_all, "100kb_HMEC_vs_BT549_DNoverlap_gene.csv", row.names = FALSE)
+```
+
+# Correlations
+
+Exploratory analysis. Expectation is that changes in eigenvectors ("D.EV") would correlate with changes in gene expression ("log2FoldChange"). And, it will hold for any compartment change
+要注意的是下面对应的区室vs转录趋势，使用的gene都是区室中筛选出来的gene，而这一次区室筛选出来的gene相比第一次就很少，因为是使用了padj的矫正，如果是使用全部数据的话，可能gene数目会更少
+
+注意下面类型绘图中使用的gene list，如果是
+degs_full则使用的是全部的gene，如果使用的是deg则是差异表达基因
+
+genes_AA_full之类是非差异表达的gene，是区室overlap的gene，是子集
+degs_full是差异表达之前整理的gene，是全集
+degs是差异表达gene，也是子集
+！！！！！！！！！！！！！！！！！！！！！！！总之右边可以使用全部的gene即degs_full，也可以使用deg差异表达基因本身，但是统计意义就不一样了，当然可以两幅图都保存
+总之就是取交集，只不过取的交集是不一样的罢了，
+前者是取全部gene与区室gene的交集，当然看的就是区室gene
+后者是全DEG与区室gene的交集，理论上是看的区室gene中差异表达的那一部分的表达趋势
+
+## AA
+
+```{r fig.height=4, fig.width=5}
+DEGs_compartment <- left_join(genes_AA_full[, c("genes", "D.EV")], degs_full[, c("genes", "logFC")], by = c("genes"))
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  ggtitle("dcHiC AA vs expression changes","r= 0.369 p= 5.045e-11") # "r= 0.369 p= 5.045e-11"  #标题依据下面的print之后在这里添加
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV, DEGs_compartment$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#可以修改如下，再添加到上面的副标题中，反正是相关系数，和显著p值
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#"r= 0.369 p= 5.045e-11"
+ggsave(fileNameOut1, width = 5, height = 5)
+
+
+
+#注意下面是两幅图都保存，保存的是DEG的
+DEGs_compartment <- left_join(genes_AA_full[, c("genes", "D.EV")], degs[, c("genes", "logFC")], by = c("genes"))
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  ggtitle("dcHiC AA vs expression changes","r= 0.69 p= 4.620e-06")  #标题依据下面的print之后在这里添加
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV, DEGs_compartment$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#可以修改如下，再添加到上面的副标题中，反正是相关系数，和显著p值
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#"r= 0.69 p= 4.620e-06"
+ggsave(fileNameOut12, width = 5, height = 5)
+```
+
+## BB
+
+```{r fig.height=4, fig.width=5}
+DEGs_compartment <- left_join(genes_BB_full[, c("genes", "D.EV")], degs_full[, c("genes", "logFC")], by = c("genes"))
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  ggtitle("dcHiC BB vs expression changes","r= 0.663 p= 2.246e-10")# 
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV, DEGs_compartment$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#"r= 0.663 p= 2.246e-10"
+ggsave(fileNameOut2, width = 5, height = 5)
+
+
+
+
+#下面的是DEG的
+DEGs_compartment <- left_join(genes_BB_full[, c("genes", "D.EV")], degs[, c("genes", "logFC")], by = c("genes"))
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  ggtitle("dcHiC BB vs expression changes","r= 0.828 p= 5.877e-03")
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV, DEGs_compartment$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#"r= 0.828 p= 5.877e-03"
+ggsave(fileNameOut22, width = 5, height = 5)
+```
+
+## AB
+
+```{r fig.height=4, fig.width=5}
+DEGs_compartment <- left_join(genes_AB_full[, c("genes", "D.EV")], degs_full[, c("genes", "logFC")], by = c("genes"))
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  ggtitle("dcHiC AB vs expression changes","r= 0.176 p= 1.692e-03") #
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV, DEGs_compartment$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#"r= 0.176 p= 1.692e-03"
+
+ggsave(fileNameOut3, width = 5, height = 5)
+
+
+
+#下面是DEG的
+DEGs_compartment <- left_join(genes_AB_full[, c("genes", "D.EV")], degs[, c("genes", "logFC")], by = c("genes"))
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  ggtitle("dcHiC AB vs expression changes","r= -0.058 p= 6.335e-01")
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV, DEGs_compartment$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#"r= -0.058 p= 6.335e-01"
+ggsave(fileNameOut32, width = 5, height = 5)
+```
+
+## BA
+```{r fig.height=4, fig.width=5}
+DEGs_compartment <- left_join(genes_BA_full[, c("genes", "D.EV")], degs_full[, c("genes", "logFC")], by = c("genes"))
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  ggtitle("dcHiC BA vs expression changes","r= 0.208 p= 3.073e-04") #
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV, DEGs_compartment$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+# "r= 0.208 p= 3.073e-04"
+ggsave(fileNameOut4, width = 5, height = 5)
+
+
+
+#下面是DEG的
+DEGs_compartment <- left_join(genes_BA_full[, c("genes", "D.EV")], degs[, c("genes", "logFC")], by = c("genes"))
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  ggtitle("dcHiC BA vs expression changes","r= 0.381 p= 7.304e-02")
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV, DEGs_compartment$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#"r= 0.381 p= 7.304e-02"
+ggsave(fileNameOut42, width = 5, height = 5)
+```
+
+## All
+ggsave("100kb_TNBCvsHMEC_BApadj1.pdf", width = 5, height = 5)
+```{r fig.height=4, fig.width=5}
+# Collapse all genes by max 对基因数据按照基因名称进行分组，并计算每个基因的 D.EV 值的最大绝对值，最终得到一个包含基因名称和对应最大绝对值的新数据框,应该是为了处理同名的symbol的gene id的问题
+genes_all_full_selected <- genes_all_full[, c("genes", "D.EV")]
+maxabs <- function (x) max(abs(x))
+genes_all_full_selected <- aggregate(genes_all_full_selected$D.EV, by = list(genes_all_full_selected$genes), "max")
+colnames(genes_all_full_selected) <- c("genes", "D.EV") 
+
+DEGs_compartment <- left_join(genes_all_full_selected, degs_full[, c("genes", "logFC")], by = c("genes"))
+# DEGs_compartment <- DEGs_compartment[abs(DEGs_compartment$logFC) > 2, ]  
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +    
+  ggtitle("dcHiC all vs expression changes","r= 0.208 p= 0.000e+00")
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV, DEGs_compartment$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#"r= 0.208 p= 0.000e+00"，上面结果太显著了
+ggsave("100kb_TNBCvsHMEC_ALLpadj1.pdf", width = 5, height = 5)
+ggsave(fileNameOut5, width = 5, height = 5)
+
+
+# Remove unchanged genes with logFC +/- 1SD
+dcHiC_D.EV_threshold <- sd(DEGs_compartment$D.EV)#计算了 DEGs_compartment 数据框中 D.EV 列（基因的差异表达值）的标准差
+Differential_expression_log2FC_threshold <- sd(DEGs_compartment$logFC)#计算了 DEGs_compartment 数据框中 logFC 列（基因的表达变化值）的标准差
+DEGs_compartment_filtered <- DEGs_compartment %>% dplyr::filter(abs(D.EV) > dcHiC_D.EV_threshold & abs(logFC) > Differential_expression_log2FC_threshold)
+#过滤条件是基因的绝对值差异表达值（abs(D.EV)）大于 dcHiC_D.EV_threshold 的标准差，并且基因的绝对值表达变化值（abs(logFC)）大于 Differential_expression_log2FC_threshold 的标准差。这样保留了差异表达值和表达变化值都大于对应标准差的基因，过滤掉了未发生变化的基因或变化较小的基因
+ggplot(DEGs_compartment_filtered, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2, size = 3) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) + # , max.overlaps = 10
+  theme_classic() +
+  theme(legend.position = "none") +
+  ggtitle("dcHiC all vs expression changes","r= 0.53 p= 0.000e+00")
+ggsave(fileNameOut5, width = 5, height = 5)
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment_filtered$D.EV, DEGs_compartment_filtered$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#"r= 0.53 p= 0.000e+00"
+ggsave(file.path(dir_results, "HMECTNBC_all_2SD_RNAseq.pdf"), width = 5, height = 5)
+#上面的结果太显著了，所以最后结果的
+
+
+
+
+
+
+#下面是差异表达gene的
+genes_all_full_selected <- genes_all_full[, c("genes", "D.EV")]
+maxabs <- function (x) max(abs(x))
+genes_all_full_selected <- aggregate(genes_all_full_selected$D.EV, by = list(genes_all_full_selected$genes), "max")
+colnames(genes_all_full_selected) <- c("genes", "D.EV") 
+
+DEGs_compartment <- left_join(genes_all_full_selected, degs[, c("genes", "logFC")], by = c("genes"))
+# DEGs_compartment <- DEGs_compartment[abs(DEGs_compartment$logFC) > 2, ]  
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment, aes(y = D.EV, x = logFC, color = logFC)) +
+  geom_point(size=2) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +    
+  ggtitle("dcHiC all vs expression changes","r= 0.387 p= 0.000e+00")
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV, DEGs_compartment$logFC)
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+print(paste("r=", round(res$r[1, 2], digits = 3), "p=", formatC(res$P[1, 2], format = "e", digits = 3) ))
+#"r= 0.387 p= 0.000e+00"
+ggsave(fileNameOut52, width = 5, height = 5)
+```
+
+
+下面这几部分照样还是不做不执行，之后找到特殊的通路之后再进行对应的通路的分析，
+#总之下面的分析暂时先不用执行，可以之后找到先验gene list或者是通过GSEA分析之后有了特定的研究方向再进行
+！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+这部分分析比较奇怪，因为原文献中是用了WGS分析delete的某些区域的gene，某种程度上相当于使用了先验功能的gene（所谓先验，就是gene list不是在hic分析中定位到的）
+所以这部分我感觉可以用于CRC分析，分析一下TNBC的CRC是不是不变的
+## ABC transporters only
+
+```{r}
+# Collapse all genes by max 
+genes_all_full_selected <- genes_all_full[, c("genes", "D.EV")]
+maxabs <- function (x) max(abs(x))
+genes_all_full_selected <- aggregate(genes_all_full_selected$D.EV, by = list(genes_all_full_selected$genes), "max")
+colnames(genes_all_full_selected) <- c("genes", "D.EV") 
+
+DEGs_compartment <- left_join(genes_all_full_selected, degs_full[, c("genes", "logFC")], by = c("genes"))
+# DEGs_compartment <- DEGs_compartment[abs(DEGs_compartment$logFC) > 2, ]
+DEGs_compartment <- DEGs_compartment[complete.cases(DEGs_compartment), ]
+ggplot(DEGs_compartment[grepl("^ABC", DEGs_compartment$genes), ], aes(y = D.EV, x = logFC, color = logFC, label = genes)) +
+  geom_point(size=2) +
+  geom_text_repel(colour = "black", size = 3) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  ggtitle("dcHiC vs. ABC transporter expression")
+ggsave(fileNameOut6, width = 3.5, height = 3.5)
+# Calculate correlation
+res <- Hmisc::rcorr(DEGs_compartment$D.EV[grepl("^ABC", DEGs_compartment$genes)], DEGs_compartment$logFC[grepl("^ABC", DEGs_compartment$genes)])
+print(paste("Pearson correlation:", round(res$r[1, 2], digits = 3), "P-value", formatC(res$P[1, 2], format = "e", digits = 3) ))
+
+```
+
+
+# Pathview
+
+```{r eval = FALSE}
+library(pathview)
+OrgDb <- "org.Hs.eg.db"
+species <- "hsa"
+# Differentially expressed genes
+degs <- data.frame(genes = genes_all_full$genes, logFC = genes_all_full$D.EV)
+# Convert to EntrezID
+degs.eg <-clusterProfiler::bitr(degs$genes, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = OrgDb)
+degs <- left_join(degs, degs.eg, by = c("genes" = "SYMBOL"))
+degs <- degs[!is.na(degs$ENTREZID), ]
+degs <- aggregate(x = degs$logFC, by = list(degs$ENTREZID), FUN = max )
+colnames(degs) <- c("ENTREZID", "logFC")
+# Construct vector of FCs
+degs.genes <- degs$logFC
+names(degs.genes) <- degs$ENTREZID
+
+# hsa00350	Tyrosine metabolism
+# kegg_ids <- data.frame(ID = c("00350", "05217", "00980", "00982"),
+#                        Description = c("Tyrosine metabolism", "Basal cell carcinoma", "Metabolism of xenobiotics by cytochrome P450", "Drug metabolism - cytochrome P450"))
+kegg_ids <- read_xlsx("/Users/mdozmorov/Documents/Data/GoogleDrive/HiC_files/results/AB_compartments/dcHiC_2021-12-03/results/AB_gene_enrichment_250kb_0.3.xlsx", sheet = "GSEA.KEGG.ALL")
+
+j <- 0
+# Cycle through each KEGG ID
+for (i in 1:nrow(kegg_ids)) {
+  print(kegg_ids$Description[i])
+  # Get KEGG pathway and overlay DEGs
+  pathview(gene.data = degs.genes, pathway.id = as.character(kegg_ids$ID[i]), species = species, gene.idtype = "ENTREZ", gene.annotpkg = OrgDb, out.suffix = make.names(kegg_ids$Description[i]))
+  # Rename PNG file
+  fileNamePngIn  <- paste0(kegg_ids$ID[i], ".", make.names(kegg_ids$Description[i]), ".png")
+  fileNamePngOut <- paste0(formatC(j, format="g", digits=2, flag = "0"), ".", kegg_ids$ID[i], ".", make.names(kegg_ids$Description[i]), ".png")
+  system(paste0("mv ", fileNamePngIn, " ", fileNamePngOut))
+  j <- j + 1 # Increase counter
+  system(paste0("rm ", kegg_ids$ID[i], ".*")) # Clean up temporary files
+}
+# brew install imagemagick
+system(paste0("convert ", "*", species, "*.png ", "WGS/results/pathways_dcHiC.pdf")) # Combine PNGs into one PDF
+system(paste0("rm ", "*", species, "*.png")) 
+```
+
+## Selected
+
+```{r eval=FALSE}
+library(pathview)
+library(readxl)
+library(clusterProfiler)
+library(dplyr)
+OrgDb <- "org.Hs.eg.db"
+species <- "hsa"
+
+dir_data <- "/Users/mdozmorov/Documents/Data/GoogleDrive/HiC_files/results/AB_compartments/dcHiC_2021-12-03/"
+fileNameIn1 <- file.path(dir_data, "results/AB_gene_summary_250kb_1.xlsx")
+# All genes ranked by eigenvector differences
+res <- read_xlsx(fileNameIn1, sheet = "GenesAll")
+degs <- data.frame(genes = res$genes, logFC = res$D.EV)
+# Convert to EntrezID
+degs.eg <-clusterProfiler::bitr(degs$genes, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = OrgDb)
+degs <- left_join(degs, degs.eg, by = c("genes" = "SYMBOL"))
+degs <- degs[!is.na(degs$ENTREZID), ]
+degs <- aggregate(x = degs$logFC, by = list(degs$ENTREZID), FUN = max )
+colnames(degs) <- c("ENTREZID", "logFC")
+# Construct vector of FCs
+degs.genes <- degs$logFC
+names(degs.genes) <- degs$ENTREZID
+
+kegg_names = c("ABC transporters",
+"Adherens junction",
+"Breast cancer", # hsa05224
+"Cell cycle",
+"Drug metabolism - cytochrome P450",
+"Estrogen signaling pathway", 
+"Focal adhesion",
+"Hedgehog signaling pathway",
+"mTOR signaling pathway",
+"p53 signaling pathway",
+"Pathways in cancer",
+"PI3K-Akt signaling pathway",
+"Ras signaling pathway",
+"Ribosome biogenesis in eukaryotes",
+"Ribosome", 
+"TGF-beta signaling pathway",
+"TNF signaling pathway", 
+"Toll-like receptor signaling pathway", 
+"Wnt signaling pathway", 
+"Chemical carcinogenesis",
+"Metabolism of xenobiotics by cytochrome P450",
+"Oxidative phosphorylation")
+
+xx <- paths.hsa  # Text to ID mapping dataset
+setdiff(kegg_names, xx) # Names that did not map
+# Google and Manually map unmapped IDs
+# xx[grep("Alzheimer", xx, ignore.case = TRUE)]
+kegg_unmapped <- c("05224") # Manually map unmapped ones
+# kegg_unmapped <- NULL # Use if all mapped
+kegg_ids <- c(names(xx)[xx %in% kegg_names]) # All KEGG IDs
+kegg_ids <- kegg_ids[match(kegg_names, xx[xx %in% kegg_names])] # Match name order
+kegg_ids <- sub("hsa", "", kegg_ids) # Strip off "hsa"
+kegg_ids <- kegg_ids[!is.na(kegg_ids)] # Remove NAs
+kegg_ids <- c(kegg_ids, kegg_unmapped) # Attach unmapped
+
+j <- 0
+# Cycle through each KEGG ID
+for (i in 1:length(kegg_ids)) {
+  # Get KEGG pathway and overlay DEGs
+  pathview(gene.data = degs.genes, pathway.id = as.character(kegg_ids[i]), species = species, gene.idtype = "ENTREZ", gene.annotpkg = OrgDb, out.suffix = "selected")
+  # Rename PNG file
+  fileNamePngIn  <- paste0(species, kegg_ids[i], ".selected.png")
+  fileNamePngOut <- paste0(formatC(j, format="g", digits=2, flag = "0"), ".", species, kegg_ids[i], ".", make.names(kegg_ids[i]), ".png")
+  system(paste0("mv ", fileNamePngIn, " ", fileNamePngOut))
+  j <- j + 1 # Increase counter
+  system(paste0("rm ", species, kegg_ids[i], ".*")) # Clean up temporary files
+}
+# brew install imagemagick
+system(paste0("convert ", "*.", species, "*.png ", file.path(dir_data, "results/pathways_dcHiC_selected.pdf"))) # Combine PNGs into one PDF
+system(paste0("rm ", "*.", species, "*.png")) 
+```
+
+
+
+
+
+
+
+#从下面开始对区室转换overlap的gene做一个富集分析！！！！！！！！！！！！！！！！！！
+可以利用GSEA之前在RNA-seq中使用到的脚本，
+另外主要是GSEA除了对DEG做是比较常见的之外，对于非DEG的检验以及如何做分析是一个问题
+主要是非DEG需要一个指标，以对应DEG中制作gene list中所需要的logFC
+参考源代码，使用的是原来的D.EV作为logFC的平替
+
+注意下面初步分析的区室AB的GSEA，使用的是p阈值0.05，然后padj使用默认的BH，但是这种设置下BA区室分析结果为空，应该是条件设置过于严格导致BA区室分析不能够完成，
+所以此处仅仅进行AB区室的分析，然后仅保存AB区室的结果，然后统一的宽松阈值分析就放在下一模块
+```{r}
+#fileNameIn1就是AB_gene_summary_100kb_0.1.xlsx，但是为了防止和前面的BT549的第一次操作混淆，此处还是直接列出文件路径
+# Read data created by 05_AB_eigenvector, depending on sheet
+read_genes <- function(sheet) {
+  genes_XX_ranked <- read_xlsx("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/HMEC_vs_TNBC_100kb_dchic/DifferentialResult/results/AB_gene_summary_100kb_0.1.xlsx", sheet = sheet)
+  # Differential Eigenvector (D.EV) for GenesAB is always negative. 
+  # Reverse the sign to use the descending order for GSEA
+  if (sheet == "GenesAB") { 
+    genes_XX_ranked$D.EV <- -1 * genes_XX_ranked$D.EV
+  }
+  # For genes with multiple D.EV values, select one with maximum difference
+  # For negative D.EV values, it will select minimum, we have to tolerate it
+  genes_XX_ranked <- aggregate(genes_XX_ranked$D.EV, by = list(genes_XX_ranked$genes), FUN = max)
+  # Assign columns
+  colnames(genes_XX_ranked) <- c("genes", "D.EV")  
+  return(genes_XX_ranked)
+}
+
+
+#对应的数据框中的gene对象起码得有gene以及DEV两列
+#load data主要是读入01脚本中处理区室注释之后的gene的数据，即多sheet的表格数据，利用上述定义的函数，另外注意D.EV的绝对值
+genes_AB_full <- read_genes(sheet = "GenesAB")
+genes_BA_full <- read_genes(sheet = "GenesBA")
+# All 区室gene for GSEA
+
+#下面是区室AB的gene的GSEA
+res.all_AB <- genes_AB_full
+res.all_AB <-  res.all_AB[ !is.na(res.all_AB$genes), ]
+# List of t-statistics
+  geneList_AB <-  res.all_AB$D.EV
+  # Make it named
+  names(geneList_AB) <-  res.all_AB$genes
+  # And decreasing sorted
+  geneList_AB <- sort(geneList_AB, decreasing = TRUE)
+
+#下面是区室BA的gene的GSEA
+res.all_BA <- genes_BA_full
+res.all_BA <-  res.all_BA[ !is.na(res.all_BA$genes), ]
+# List of t-statistics
+  geneList_BA <-  res.all_BA$D.EV
+  # Make it named
+  names(geneList_BA) <-  res.all_BA$genes
+  # And decreasing sorted
+  geneList_BA <- sort(geneList_BA, decreasing = TRUE)
+
+#下面是对于区室AB转换过程中涉及到的gene的富集分析，主要使用的就是genelist_AB
+gse_AB <- gseGO(geneList=geneList_AB, 
+             ont ="ALL", 
+             keyType = "SYMBOL", 
+             minGSSize = 10, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = organism)
+
+options(enrichplot.colours = c("red","blue"))
+
+#barplot!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!失效,开发者没有维护barplot功能，只能使用通用的barplot，需要自己动手,暂时不做了
+#barplot(as.numeric(gse_AB$Description),showCategory=20)
+#goplot(gse_AB)
+
+#dotplot
+dotplot(gse_AB, showCategory=20)   #+ ggtitle("Dotplot for DEG GSEA across HMEC vs TNBC")  #只画了top20
+ggsave("AB_GSEA_HMEC_vs_TNBC_dotplot_BH.pdf",height = 7,width = 7)
+dotplot(gse_AB, showCategory=10, split=".sign") + facet_grid(.~.sign)   #+ ggtitle("dotplot for DEG GSEA across HMEC vs TNBC") 
+ggsave("AB_GSEA_HMEC_vs_TNBC_dotplot_sign_BH.pdf",height = 7,width = 7) #包含有activated，suppressed
+
+#ridgeline plot 脊线图
+ridgeplot(gse_AB,showCategory = 20)+ labs(x = "enrichment distribution")  #+ggtitle("Ridgeplot for DEG GSEA across HMEC vs TNBC")
+ggsave("AB_GSEA_HMEC_vs_TNBC_ridgeplot_BH.pdf",height = 9,width = 12)
+
+
+#cnetplot()将基因和生物学概念(例如GO术语或KEGG通路)的联系描述为一个网络
+cnetplot(gse_AB, foldChange=geneList_AB)
+ggsave("AB_GSEA_HMEC_vs_TNBC_cnetplot_BH.pdf",height = 7,width = 7)
+cnetplot(gse_AB, foldChange=geneList_AB, circular = TRUE, colorEdge = TRUE)
+ggsave("AB_GSEA_HMEC_vs_TNBC_cnetplot_circ_BH.pdf",height = 7,width = 10)
+
+
+# Heatmap-like functional classification，与cnetplot类似,也使用symbol的效果看看
+heatplot(gse_AB, foldChange=geneList_AB,showCategory = 5)
+ggsave("AB_GSEA_HMEC_vs_TNBC_heatplot_BH.pdf",height = 3,width = 15)
+heatplot(gse_AB, foldChange=geneList_AB,showCategory = 10)
+ggsave("AB_GSEA_HMEC_vs_TNBC_heatplot_10_BH.pdf",height = 4,width = 16)
+
+#Tree plot富集项的分层聚类
+gse_AB2 <- pairwise_termsim(gse_AB)
+treeplot(gse_AB2)
+ggsave("AB_GSEA_HMEC_vs_TNBC_treeplot_BH.pdf",height = 7,width = 12)
+
+#Enrichment Map富集的术语组织成一个网络，网络的边缘连接重叠的基因集。这样，相互重叠的基因集往往会聚集在一起，便于识别功能模块
+gse_AB2 <- pairwise_termsim(gse_AB)
+emapplot(gse_AB2,layout="kk",showCategory = 20) #可以修改layout='circle'之类
+ggsave("AB_GSEA_HMEC_vs_TNBC_EnrichmentMap_BH.pdf",height = 7,width = 7)
+
+#running score and preranked list of GSEA result，对于GSEA的传统可视化方法
+p1 <- gseaplot(gse_AB, geneSetID = 1, by = "runningScore", title = gse_AB$Description[1])
+p2 <- gseaplot(gse_AB, geneSetID = 1, by = "preranked", title = gse_AB$Description[1])
+p3 <- gseaplot(gse_AB, geneSetID = 1, title = gse_AB$Description[1])
+#cowplot::plot_grid(p1, p2, p3, ncol=1, labels=LETTERS[1:3])
+ggsave("AB_GSEA_HMEC_vs_TNBC_gseaplot_BH.pdf",p3,height = 7,width = 7)
+gseaplot2(gse_AB, geneSetID = 1:5)
+ggsave("AB_GSEA_HMEC_vs_TNBC_gseaplot_5_BH.pdf",height = 7,width = 10)
+
+  
+#goplot(gse_AB)
+
+#如果需要转换为entrez，就执行以下代码，上面的就使用symbol的gene id
+#  res.all_AB <- genes_AB_full
+#  # Convert symbols to entrezids,不一定需要转换为entrez id，本身的symbol或者是其他的gene id都可以处理
+#  eid <- bitr(res.all_AB$genes, fromType="SYMBOL", toType="ENTREZID", OrgDb=OrgDb)
+#  # Attach converted entrezids
+#   res.all_AB <- left_join( res.all_AB, eid, by = c("genes" = "SYMBOL"))
+#   res.all_AB <-  res.all_AB[ !is.na(res.all_AB$ENTREZID), ]
+#  # List of t-statistics
+#  geneList <-  res.all_AB$D.EV
+#  # Make it named
+#  names(geneList) <-  res.all_AB$ENTREZID
+#  # And decreasing sorted
+#  geneList <- sort(geneList, decreasing = TRUE)
+```
+
+
+
+#下面是对BA区室分析之后发现阈值不行再调整的方法，所以将AB与BA都调整过来进行再次分析
+！！！！！！！！！！！！！！！！！！注意，如果这里还是使用AB的gseGO设置，最后得到的数据记录则为0，意味着这里的富集分析需要设置不一样的参数，所以如果这里需要改设置参数的话，建议是上面的参数也改动
+上面的AB分析使用的是p阈值0.05，padj矫正方法使用默认的BH，但是如果BA分析也是这样的话则得到的分析结果为空！！！！！！！！！！！！！！！！！！！！！！！！！！！
+#现在经过测试，发现是padj矫正调增为none或者是p阈值调整都能够达到出图的效果，
+但是p的阈值起码0.1也不行，还得往上
+所以建议是BA修改矫正方法为none，然后同理AB也修改一下矫正方法！！！！！！！！！！！！
+
+总之，这一块统一矫正为p阈值0.05，然后padj矫正方法为none
+
+如果不矫正none但是下调p阈值为0.01的话，还是有结果的，
+BA：
+p不矫正，但是0.01:54 obs
+p不矫正，但是0.05:119 obs
+
+AB:
+p不矫正，但是0.01:33 obs
+p不矫正，但是0.05:71 obs
+原来的p矫正BH矫正之后+0.05:19 obs
+
+所以还是建议使用进一步严格的阈值，如果矫正上有问题
+那就统一不矫正+阈值0.01!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+```{r}
+gse_AB <- gseGO(geneList=geneList_AB, 
+             ont ="ALL", 
+             keyType = "SYMBOL", 
+             minGSSize = 10, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.01, 
+            pAdjustMethod = "none",
+             verbose = TRUE, 
+             OrgDb = organism)
+
+options(enrichplot.colours = c("red","blue"))
+
+#barplot!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!失效,开发者没有维护barplot功能，只能使用通用的barplot，需要自己动手,暂时不做了
+#barplot(as.numeric(gse_AB$Description),showCategory=20)
+#goplot(gse_AB)
+
+#dotplot
+dotplot(gse_AB, showCategory=20)   #+ ggtitle("Dotplot for DEG GSEA across HMEC vs TNBC")  #只画了top20
+ggsave("AB_GSEA_HMEC_vs_TNBC_dotplot.pdf",height = 7,width = 7)
+dotplot(gse_AB, showCategory=10, split=".sign") + facet_grid(.~.sign)   #+ ggtitle("dotplot for DEG GSEA across HMEC vs TNBC") 
+ggsave("AB_GSEA_HMEC_vs_TNBC_dotplot_sign.pdf",height = 7,width = 7) #包含有activated，suppressed
+
+#ridgeline plot 脊线图
+ridgeplot(gse_AB,showCategory = 20)+ labs(x = "enrichment distribution")  #+ggtitle("Ridgeplot for DEG GSEA across HMEC vs TNBC")
+ggsave("AB_GSEA_HMEC_vs_TNBC_ridgeplot.pdf",height = 9,width = 12)
+
+
+#cnetplot()将基因和生物学概念(例如GO术语或KEGG通路)的联系描述为一个网络
+cnetplot(gse_AB, foldChange=geneList_AB)
+ggsave("AB_GSEA_HMEC_vs_TNBC_cnetplot.pdf",height = 7,width = 7)
+cnetplot(gse_AB, foldChange=geneList_AB, circular = TRUE, colorEdge = TRUE)
+ggsave("AB_GSEA_HMEC_vs_TNBC_cnetplot_circ.pdf",height = 7,width = 10)
+
+
+# Heatmap-like functional classification，与cnetplot类似,也使用symbol的效果看看
+heatplot(gse_AB, foldChange=geneList_AB,showCategory = 5)
+ggsave("AB_GSEA_HMEC_vs_TNBC_heatplot.pdf",height = 3,width = 15)
+heatplot(gse_AB, foldChange=geneList_AB,showCategory = 10)
+ggsave("AB_GSEA_HMEC_vs_TNBC_heatplot_10.pdf",height = 4,width = 16)
+
+#Tree plot富集项的分层聚类
+gse_AB2 <- pairwise_termsim(gse_AB)
+treeplot(gse_AB2)
+ggsave("AB_GSEA_HMEC_vs_TNBC_treeplot.pdf",height = 7,width = 12)
+
+#Enrichment Map富集的术语组织成一个网络，网络的边缘连接重叠的基因集。这样，相互重叠的基因集往往会聚集在一起，便于识别功能模块
+gse_AB2 <- pairwise_termsim(gse_AB)
+emapplot(gse_AB2,layout="kk",showCategory = 20) #可以修改layout='circle'之类
+ggsave("AB_GSEA_HMEC_vs_TNBC_EnrichmentMap.pdf",height = 7,width = 7)
+
+#running score and preranked list of GSEA result，对于GSEA的传统可视化方法
+p1 <- gseaplot(gse_AB, geneSetID = 1, by = "runningScore", title = gse_AB$Description[1])
+p2 <- gseaplot(gse_AB, geneSetID = 1, by = "preranked", title = gse_AB$Description[1])
+p3 <- gseaplot(gse_AB, geneSetID = 1, title = gse_AB$Description[1])
+#cowplot::plot_grid(p1, p2, p3, ncol=1, labels=LETTERS[1:3])
+ggsave("AB_GSEA_HMEC_vs_TNBC_gseaplot.pdf",p3,height = 7,width = 7)
+gseaplot2(gse_AB, geneSetID = 1:5)
+ggsave("AB_GSEA_HMEC_vs_TNBC_gseaplot_5.pdf",height = 7,width = 10)
+
+
+
+
+
+#下面是对于区室BA转换过程中涉及到的gene的富集分析，主要使用的就是genelist_BA
+
+gse_BA <- gseGO(geneList=geneList_BA, 
+             ont ="ALL", 
+             keyType = "SYMBOL", 
+             minGSSize = 10, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.01, 
+            pAdjustMethod = "none",
+             verbose = TRUE, 
+             OrgDb = organism)
+
+options(enrichplot.colours = c("red","blue"))
+
+#barplot!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!失效,开发者没有维护barplot功能，只能使用通用的barplot，需要自己动手,暂时不做了
+#barplot(as.numeric(gse_BA$Description),showCategory=20)
+#goplot(gse_BA)
+
+#dotplot,
+dotplot(gse_BA, showCategory=20)   #+ ggtitle("Dotplot for DEG GSEA across HMEC vs TNBC")  #只画了top20
+ggsave("BA_GSEA_HMEC_vs_TNBC_dotplot.pdf",height = 7,width = 7)
+dotplot(gse_BA, showCategory=10, split=".sign") + facet_grid(.~.sign)   #+ ggtitle("dotplot for DEG GSEA across HMEC vs TNBC") 
+ggsave("BA_GSEA_HMEC_vs_TNBC_dotplot_sign.pdf",height = 7,width = 7) #包含有activated，suppressed
+
+#ridgeline plot 脊线图
+ridgeplot(gse_BA,showCategory = 20)+ labs(x = "enrichment distribution")  #+ggtitle("Ridgeplot for DEG GSEA across HMEC vs TNBC")
+ggsave("BA_GSEA_HMEC_vs_TNBC_ridgeplot.pdf",height = 9,width = 12)
+
+
+#cnetplot()将基因和生物学概念(例如GO术语或KEGG通路)的联系描述为一个网络
+cnetplot(gse_BA, foldChange=geneList_BA)
+ggsave("BA_GSEA_HMEC_vs_TNBC_cnetplot.pdf",height = 7,width = 7)
+cnetplot(gse_BA, foldChange=geneList_BA, circular = TRUE, colorEdge = TRUE)
+ggsave("BA_GSEA_HMEC_vs_TNBC_cnetplot_circ.pdf",height = 7,width = 10)
+
+
+# Heatmap-like functional classification，与cnetplot类似,也使用symbol的效果看看
+heatplot(gse_BA, foldChange=geneList_BA,showCategory = 5)
+ggsave("BA_GSEA_HMEC_vs_TNBC_heatplot.pdf",height = 3,width = 15)
+heatplot(gse_BA, foldChange=geneList_BA,showCategory = 10)
+ggsave("BA_GSEA_HMEC_vs_TNBC_heatplot_10.pdf",height = 4,width = 16)
+
+#Tree plot富集项的分层聚类
+gse_BA2 <- pairwise_termsim(gse_BA)
+treeplot(gse_BA2)
+ggsave("BA_GSEA_HMEC_vs_TNBC_treeplot.pdf",height = 7,width = 12)
+
+#Enrichment Map富集的术语组织成一个网络，网络的边缘连接重叠的基因集。这样，相互重叠的基因集往往会聚集在一起，便于识别功能模块
+gse_BA2 <- pairwise_termsim(gse_BA)
+emapplot(gse_BA2,layout="kk",showCategory = 20) #可以修改layout='circle'之类
+ggsave("BA_GSEA_HMEC_vs_TNBC_EnrichmentMap.pdf",height = 7,width = 7)
+
+#running score and preranked list of GSEA result，对于GSEA的传统可视化方法
+p1 <- gseaplot(gse_BA, geneSetID = 1, by = "runningScore", title = gse_BA$Description[1])
+p2 <- gseaplot(gse_BA, geneSetID = 1, by = "preranked", title = gse_BA$Description[1])
+p3 <- gseaplot(gse_BA, geneSetID = 1, title = gse_BA$Description[1])
+#cowplot::plot_grid(p1, p2, p3, ncol=1, labels=LETTERS[1:3])
+ggsave("BA_GSEA_HMEC_vs_TNBC_gseaplot.pdf",p3,height = 7,width = 7)
+gseaplot2(gse_BA, geneSetID = 1:5)
+ggsave("BA_GSEA_HMEC_vs_TNBC_gseaplot_5.pdf",height = 7,width = 10)
+```
+
+
+#这一步其实就是获取对应的AB，BA区室gene的表达数据，来检验区室转换的真实作用
+```{r}
+library("dplyr")
+#首先，读入区室gene数据
+fileNameIn1="/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/HMEC_vs_TNBC_100kb_dchic/DifferentialResult/results/AB_gene_summary_100kb_1.xlsx"
+genes_AB_full <- read_xlsx(fileNameIn1, sheet = 3)  #672行，只有symbol
+genes_BA_full <- read_xlsx(fileNameIn1, sheet = 4)  #431行
+edgeR_exp_gene_DEGpre <- read_csv("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script8/RNA/ens_fa_gtf/DEG/edgeR_HMEC_vs_TNBC.csv")  #17,518行，有ens和symbol
+
+#逻辑返回的是第一个A的向量，所以建议是拿小的去套大的，因为我们的目的是区室的gene，所以第一个向量必须是区室gene，也就是拿——区室%in%edge——
+sum(genes_AB_full$genes %in% edgeR_exp_gene_DEGpre$symbol)  #314，672行到314行，损失太多了，说明edge的gene symbol不全面    
+sum(edgeR_exp_gene_DEGpre$symbol %in% genes_AB_full$genes)  #317
+sum(genes_BA_full$genes %in% edgeR_exp_gene_DEGpre$symbol)  #294，431行到294行，损失还是太大了
+sum(edgeR_exp_gene_DEGpre$symbol %in% genes_BA_full$genes)  #296
+
+#表达数据一般不用改动，看看区室gene在使用ens之后
+gene_symbols <- bitr(genes_AB_full$genes, fromType = "SYMBOL", toType = "ENSEMBL", OrgDb = "org.Hs.eg.db")  
+genes_AB_full_ens <- left_join(genes_AB_full, gene_symbols, by = c("genes" = "SYMBOL")) # 672行变成了718行
+sum(genes_AB_full_ens$ENSEMBL %in% edgeR_exp_gene_DEGpre$genes) #325,只比原来的341行提升了一点点，672到325还是太少了
+
+gene_symbols <- bitr(genes_BA_full$genes, fromType = "SYMBOL", toType = "ENSEMBL", OrgDb = "org.Hs.eg.db")  
+genes_BA_full_ens <- left_join(genes_BA_full, gene_symbols, by = c("genes" = "SYMBOL"))  #431行变成了456行
+sum(genes_BA_full_ens$ENSEMBL %in% edgeR_exp_gene_DEGpre$genes)   #300,同上太少了
+
+#综上，应该是表达数据的问题，不是gene id的问题，因为无论是用ens还是symbol都match的很少
+#使用ens id为主，区室gene在第一个为主检测match，更换数据库
+#1，先换一个表达exp数据，不使用DEG中过滤低表达gene的数据，而是将RNA-seq分析脚本01中all gene来处理TPM值
+#需要从DEG分析的01脚本中复现全部gene的TPM值，下面复现TPM的操作
+TPM <- read_tsv("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script8/RNA/ens_fa_gtf/TPM_allgenes_HMECvsTNBC.tsv")
+TPM <- TPM %>% dplyr::select(-starts_with("symbol"))
+TPM <- TPM %>% dplyr::mutate(log2Average.HMEC = rowMeans(TPM %>% dplyr::select(starts_with("HMEC"))), .before = starts_with("BT549")) %>%
+  dplyr::mutate(log2Average.TNBC = rowMeans(TPM %>% dplyr::select(-starts_with("HMEC"))%>%dplyr::select(-starts_with(c("gene_id","symbol")))), .before = starts_with("BT549"))
+#效果就是gene_id  symbol log2Average.HMEC log2Average.TNBC BT549_rep1 BT549_rep2 HCC70_rep1 HCC70_rep2 HMEC_rep1 HMEC_rep2 MB231_rep1 MB231_rep2 MB231_rep3
+# Convert to log2
+TPM <- cbind(TPM %>% dplyr::select("gene_id"), log2((TPM %>% dplyr::select(-c("gene_id"))) + 1))
+#但是上面这个list里面只有ens的gene id，不能直接使用，因为区室中用的是symbol，所以还是得转化一下，TPM中获取symbol信息，使用bitr函数
+#TPM中的ens id转化为symbol信息，两层gene id
+gene_symbols <- bitr(TPM$gene_id, fromType = "ENSEMBL", toType = "SYMBOL", OrgDb = "org.Hs.eg.db")  
+edgeR_exp_gene <- left_join(TPM, gene_symbols, by = c("gene_id" = "ENSEMBL"))
+# 找到具有重复gene_id的行
+duplicate_rows <- duplicated(edgeR_exp_gene$gene_id)
+# 删除重复行
+edgeR_exp_gene <- edgeR_exp_gene[!duplicate_rows, ]
+write.csv(edgeR_exp_gene, "HMEC_vs_TNBC_log2TPM_bitr.csv", row.names = FALSE)
+#好了，下面的edgeR_exp_gene是全部gene的log2TPM了，可以开始使用了
+
+#现在有了全部表达exp的gene数据edgeR_exp_gene，再看看是不是id的问题还是数据库的问题
+#3，先看id为symbol再看ens，edgeR_exp_gene中两者都有
+sum(genes_AB_full$genes %in% edgeR_exp_gene$SYMBOL) #615,即672行降到615，至少大部分都有了
+sum(genes_BA_full$genes %in% edgeR_exp_gene$SYMBOL) #385,即431降到385
+#再看看ens id，如果还是用bitr的默认数据库的话
+sum(genes_AB_full_ens$ENSEMBL %in% edgeR_exp_gene$gene_id) #619
+sum(genes_BA_full_ens$ENSEMBL %in% edgeR_exp_gene$gene_id)#386
+#看来提升不大，用symbol和ens差不多，所以是bitr数据库不给力
+
+#4，尝试使用其他数据库来转换gene id
+df_human_gene_v75 <- genes(EnsDb.Hsapiens.v75, return.type = "DataFrame")[,c("gene_id","symbol")] #64102
+#上面的v75是hg19的，如果只是id转换的话，看看最新的hg38版本是多少
+#BiocManager::install("EnsDb.Hsapiens.v86")
+#library(EnsDb.Hsapiens.v86)
+df_human_gene_v86 <- genes(EnsDb.Hsapiens.v86, return.type = "DataFrame")[,c("gene_id","symbol")] #63970
+#library(AnnotationHub)
+#ah <- AnnotationHub()#最老是87，最新是111
+#annot_h <- query(ah, patter=c("Homo","EnsDb"))
+EnsDb.Hsapiens.v111 <- annot_h[["AH116291"]]
+df_human_gene_v111 <- genes(EnsDb.Hsapiens.v111, return.type = "DataFrame")[,c("gene_id","symbol")] #
+
+#然后看看AB等区室中的id
+sum(genes_AB_full$genes %in% df_human_gene_v75$symbol) #604
+sum(genes_AB_full_ens$ENSEMBL %in% df_human_gene_v75$gene_id) #639
+sum(genes_BA_full$genes %in% df_human_gene_v75$symbol) #383
+sum(genes_BA_full_ens$ENSEMBL %in% df_human_gene_v75$gene_id) #389
+
+sum(genes_AB_full$genes %in% df_human_gene_v86$symbol) #616
+sum(genes_AB_full_ens$ENSEMBL %in% df_human_gene_v86$gene_id) #660
+sum(genes_BA_full$genes %in% df_human_gene_v86$symbol) #398
+sum(genes_BA_full_ens$ENSEMBL %in% df_human_gene_v86$gene_id) #406
+
+sum(genes_AB_full$genes %in% df_human_gene_v111$symbol) #661
+sum(genes_AB_full_ens$ENSEMBL %in% df_human_gene_v111$gene_id) #691
+sum(genes_BA_full$genes %in% df_human_gene_v111$symbol) #422
+sum(genes_BA_full_ens$ENSEMBL %in% df_human_gene_v111$gene_id) #434
+
+#综上推荐使用df_human_gene_v111作为转换注释数据库，另外表达数据还是edgeR_exp_gene不变，至于使用这个数据肯定是为了获取ens
+gene_symbols <- bitr(genes_AB_full$genes, fromType = "SYMBOL", toType = "GENEID", OrgDb = annot_h[["AH116291"]])  
+genes_AB_full_final <- left_join(genes_AB_full, gene_symbols, by = c("genes" = "SYMBOL")) #760，从672到760
+AB_exp <- edgeR_exp_gene[edgeR_exp_gene$gene_id %in% genes_AB_full_final$GENEID,] #642行，转回来,672到642
+#AB_exp_filtered <- AB_exp[!(AB_exp$log2Average.HMEC == 0 & AB_exp$log2Average.TNBC == 0), ]  #495行表达是非空的
+AB_exp_sorted <- AB_exp %>%
+  select(gene_id, SYMBOL,  log2Average.HMEC, HMEC_rep1, HMEC_rep2,log2Average.TNBC,
+         BT549_rep1, BT549_rep2, HCC70_rep1, HCC70_rep2,
+         MB231_rep1, MB231_rep2, MB231_rep3)
+write.csv(AB_exp_sorted, "AB_exp.csv", row.names = FALSE)
+#去除symbol列，同时将gene_id即ens作为行名
+AB_exp_sorted <- subset(AB_exp_sorted, select = -SYMBOL)
+rownames(AB_exp_sorted) <- AB_exp_sorted$gene_id  # 将'gene_id'列设置为行名
+AB_exp_sorted <- AB_exp_sorted[, -which(names(AB_exp_sorted) == "gene_id")] #最终是642行
+#最后再去缺失
+AB_exp_sorted_nonzero <- AB_exp_sorted[rowSums(AB_exp_sorted != 0, na.rm = TRUE) > 0, ] #最终是489行
+
+gene_symbols <- bitr(genes_BA_full$genes, fromType = "SYMBOL", toType = "GENEID", OrgDb = annot_h[["AH116291"]])  
+genes_BA_full_final <- left_join(genes_BA_full, gene_symbols, by = c("genes" = "SYMBOL")) #501行，从431行到501行
+BA_exp <- edgeR_exp_gene[edgeR_exp_gene$gene_id %in% genes_BA_full_final$GENEID,] #404行，转回来,431到404行
+#BA_exp_filtered <- BA_exp[!(BA_exp$log2Avg_HMEC == 0 & BA_exp$log2Avg_HMEC == 0), ]
+BA_exp_sorted <- BA_exp %>%
+  select(gene_id, SYMBOL, log2Average.HMEC, HMEC_rep1, HMEC_rep2 ,log2Average.TNBC,
+         BT549_rep1, BT549_rep2, HCC70_rep1, HCC70_rep2,
+         MB231_rep1, MB231_rep2, MB231_rep3)
+write.csv(BA_exp_sorted, "BA_exp.csv", row.names = FALSE)
+BA_exp_sorted <- subset(BA_exp_sorted, select = -SYMBOL)
+rownames(BA_exp_sorted) <- BA_exp_sorted$gene_id  # 将'gene_id'列设置为行名
+BA_exp_sorted <- BA_exp_sorted[, -which(names(BA_exp_sorted) == "gene_id")] #最终是642行
+BA_exp_sorted_nonzero <- BA_exp_sorted[rowSums(BA_exp_sorted != 0, na.rm = TRUE) > 0, ]  #最终是370行
+
+
+#下面就用AB/BA_exp，各自有列名gene_id即ens，以及SYMBOL即symbol，但是各自gene id里都有NA以及缺失值，建议还是使用ENS为主
+#所以上面转化为AB_exp_sorted和BA_exp_sorted
+library(pheatmap)
+ABannotation_col=data.frame(
+  Group=c("HMEC","HMEC","HMEC","TNBC","TNBC","TNBC","TNBC","TNBC","TNBC","TNBC","TNBC"),
+  row.names = colnames(AB_exp_sorted_nonzero)
+)
+p1 <- pheatmap(
+    AB_exp_sorted_nonzero, 
+    scale = 'row', 
+    fontsize_col = 8, show_rownames = FALSE, 
+    cluster_rows = TRUE, cluster_cols = TRUE,
+    color = colorRampPalette(c('green', 'black', 'red'))(100), 
+    annotation_col = ABannotation_col, 
+    cellwidth = 25, cellheight = 1, border_color = NA
+)
+ggsave("AB_exp_heatmap_raw.pdf",p1,width = 10,height = 15)
+#对列不聚类，可以按照正常顺序显示列名
+p1 <- pheatmap(
+    AB_exp_sorted_nonzero, 
+    scale = 'row', 
+    fontsize_col = 8, show_rownames = FALSE, 
+    cluster_rows = TRUE, cluster_cols = FALSE,
+    color = colorRampPalette(c('green', 'black', 'red'))(100), 
+    annotation_col = ABannotation_col, 
+    cellwidth = 25, cellheight = 1, border_color = NA
+)
+ggsave("AB_exp_heatmap_raw_nocluster.pdf",p1,width = 10,height = 15)
+
+
+#显示效果上有点差，去掉log2mean再看看效果
+AB_exp_sorted_nonzero_rmmean <- AB_exp_sorted_nonzero %>%
+  dplyr::select(HMEC_rep1, HMEC_rep2, BT549_rep1, BT549_rep2, HCC70_rep1, HCC70_rep2,
+         MB231_rep1, MB231_rep2, MB231_rep3)
+ABannotation_col=data.frame(
+  Group=c("HMEC","HMEC","TNBC","TNBC","TNBC","TNBC","TNBC","TNBC","TNBC"),
+  row.names = colnames(AB_exp_sorted_nonzero_rmmean)
+)
+p11 <- pheatmap(
+    AB_exp_sorted_nonzero_rmmean, 
+    scale = 'row', 
+    fontsize_col = 8, show_rownames = FALSE, 
+    cluster_rows = TRUE, cluster_cols = FALSE,
+    color = colorRampPalette(c('green', 'black', 'red'))(100), 
+    annotation_col = ABannotation_col, 
+    cellwidth = 25, cellheight = 1, border_color = NA
+)
+ggsave("AB_exp_heatmap_rmmean_nocluster.pdf",p11,width = 10,height = 15)
+
+
+
+
+
+
+#下面是BA的
+BAannotation_col=data.frame(
+  Group=c("HMEC","HMEC","HMEC","TNBC","TNBC","TNBC","TNBC","TNBC","TNBC","TNBC","TNBC"),
+  row.names = colnames(BA_exp_sorted_nonzero)
+)
+p1 <- pheatmap(
+    BA_exp_sorted_nonzero, 
+    scale = 'row', 
+    fontsize_col = 8, show_rownames = FALSE, 
+    cluster_rows = TRUE, cluster_cols = TRUE,
+    color = colorRampPalette(c('green', 'black', 'red'))(100), 
+    annotation_col = BAannotation_col, 
+    cellwidth = 25, cellheight = 1, border_color = NA
+)
+ggsave("BA_exp_heatmap_raw.pdf",p1,width = 10,height = 15)
+#对列不聚类，可以按照正常顺序显示列名
+p1 <- pheatmap(
+    BA_exp_sorted_nonzero, 
+    scale = 'row', 
+    fontsize_col = 8, show_rownames = FALSE, 
+    cluster_rows = TRUE, cluster_cols = FALSE,
+    color = colorRampPalette(c('green', 'black', 'red'))(100), 
+    annotation_col = BAannotation_col, 
+    cellwidth = 25, cellheight = 1, border_color = NA
+)
+ggsave("BA_exp_heatmap_raw_nocluster.pdf",p1,width = 10,height = 15)
+
+
+#显示效果上有点差，去掉log2mean再看看效果
+BA_exp_sorted_nonzero_rmmean <- BA_exp_sorted_nonzero %>%
+  dplyr::select(HMEC_rep1, HMEC_rep2, BT549_rep1, BT549_rep2, HCC70_rep1, HCC70_rep2,
+         MB231_rep1, MB231_rep2, MB231_rep3)
+BAannotation_col=data.frame(
+  Group=c("HMEC","HMEC","TNBC","TNBC","TNBC","TNBC","TNBC","TNBC","TNBC"),
+  row.names = colnames(BA_exp_sorted_nonzero_rmmean)
+)
+p11 <- pheatmap(
+    BA_exp_sorted_nonzero_rmmean, 
+    scale = 'row', 
+    fontsize_col = 8, show_rownames = FALSE, 
+    cluster_rows = TRUE, cluster_cols = FALSE,
+    color = colorRampPalette(c('green', 'black', 'red'))(100), 
+    annotation_col = BAannotation_col, 
+    cellwidth = 25, cellheight = 1, border_color = NA
+)
+ggsave("BA_exp_heatmap_rmmean_nocluster.pdf",p11,width = 10,height = 15)
+
+
+
+
+#上面的效果都不是很好，可以看看如果是最开始的gene id转换的话，就是会丢掉比较多的gene信息的那个直接symbol转换
+#gene_symbols <- bitr(genes_AB_full$genes, fromType = "SYMBOL", toType = "ENSEMBL", OrgDb = "EnsDb.Hsapiens.v86")  
+```
+
+```{r}
+
+
+```
+
+
+
+
+
