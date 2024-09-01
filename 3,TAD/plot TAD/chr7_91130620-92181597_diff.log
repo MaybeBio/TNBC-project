@@ -1,0 +1,62 @@
+nohup: ignoring input
+INFO:pygenometracks.tracksClass:initialize 1. [x-axis]
+INFO:pygenometracks.tracksClass:initialize 2. [hic]
+INFO:pygenometracks.tracksClass:initialize 3. [tads]
+  0%|          | 0/5 [00:00<?, ?it/s]100%|██████████| 5/5 [00:00<00:00, 17317.52it/s]
+INFO:pygenometracks.tracksClass:initialize 4. [spacer]
+INFO:pygenometracks.tracksClass:initialize 5. [score]
+  0%|          | 0/53 [00:00<?, ?it/s]100%|██████████| 53/53 [00:00<00:00, 57204.87it/s]
+INFO:pygenometracks.tracksClass:initialize 6. [hic]
+INFO:pygenometracks.tracksClass:initialize 7. [tads]
+  0%|          | 0/7 [00:00<?, ?it/s]100%|██████████| 7/7 [00:00<00:00, 32731.47it/s]
+INFO:pygenometracks.tracksClass:initialize 8. [spacer]
+INFO:pygenometracks.tracksClass:initialize 9. [score]
+  0%|          | 0/53 [00:00<?, ?it/s]100%|██████████| 53/53 [00:00<00:00, 66219.28it/s]
+INFO:pygenometracks.tracksClass:initialize 10. [hic]
+INFO:pygenometracks.tracksClass:initialize 11. [tads]
+WARNING:pygenometracks.utilities:BEDTools intersect raised an error:
+***** ERROR: illegal number "0.0009906225660921196". Exiting...
+
+Will not use BEDTools.
+
+Value: 0.0009906225660921196 in field 7 is not an integer
+ Only the first 6 fields will be used.
+  0%|          | 0/1406 [00:00<?, ?it/s]100%|██████████| 1406/1406 [00:00<00:00, 51286.17it/s]
+INFO:pygenometracks.tracksClass:initialize 12. [spacer]
+INFO:pygenometracks.tracksClass:initialize 13. [hic]
+INFO:pygenometracks.tracksClass:initialize 14. [tads]
+Value: 8.265613582005137e-68 in field 7 is not an integer
+ Only the first 6 fields will be used.
+  0%|          | 0/4 [00:00<?, ?it/s]100%|██████████| 4/4 [00:00<00:00, 33825.03it/s]
+INFO:pygenometracks.tracksClass:initialize 15. [spacer]
+INFO:pygenometracks.tracksClass:initialize 16. [genes]
+  0%|          | 0/20 [00:00<?, ?it/s]100%|██████████| 20/20 [00:00<00:00, 51432.30it/s]
+INFO:pygenometracks.tracksClass:time initializing track(s):
+INFO:pygenometracks.tracksClass:0.28385353088378906
+DEBUG:pygenometracks.tracksClass:Figure size in cm is 40 x 43.82378115138633. Dpi is set to 72
+
+INFO:pygenometracks.tracksClass:plotting 1. [x-axis]
+INFO:pygenometracks.tracksClass:plotting 2. [hic]
+INFO:pygenometracks.tracks.GenomeTrack:setting min, max values for track 2. [hic] to: 1.0, 177.29838669545495
+
+INFO:pygenometracks.tracksClass:plotting 3. [tads]
+INFO:pygenometracks.tracksClass:plotting 4. [spacer]
+INFO:pygenometracks.tracksClass:plotting 5. [score]
+INFO:pygenometracks.tracksClass:plotting 6. [hic]
+INFO:pygenometracks.tracks.GenomeTrack:setting min, max values for track 6. [hic] to: 1.0, 237.44781591006304
+
+INFO:pygenometracks.tracksClass:plotting 7. [tads]
+INFO:pygenometracks.tracksClass:plotting 8. [spacer]
+INFO:pygenometracks.tracksClass:plotting 9. [score]
+INFO:pygenometracks.tracksClass:plotting 10. [hic]
+INFO:pygenometracks.tracks.GenomeTrack:setting min, max values for track 10. [hic] to: 1.0, 177.29838669545495
+
+INFO:pygenometracks.tracksClass:plotting 11. [tads]
+INFO:pygenometracks.tracksClass:plotting 12. [spacer]
+INFO:pygenometracks.tracksClass:plotting 13. [hic]
+INFO:pygenometracks.tracks.GenomeTrack:setting min, max values for track 13. [hic] to: 1.0, 177.29838669545495
+
+INFO:pygenometracks.tracksClass:plotting 14. [tads]
+INFO:pygenometracks.tracksClass:plotting 15. [spacer]
+INFO:pygenometracks.tracksClass:plotting 16. [genes]
+DEBUG:pygenometracks.tracks.GenomeTrack:ylim 12.58,-0.08
