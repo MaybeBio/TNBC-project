@@ -20,11 +20,9 @@ for folder in $FOLDER/logs/*/; do
   convertedFILE_=$fname".cool"
 
 #--------------------------
-# Convert HiC-Pro matrices to cool matrices
+# Convert HiC-Pro matrices to h5 matrices
 #--------------------------
 
   hicConvertFormat --matrices ${hicproFILE_} --bedFileHicpro ${hicproBEDFILE_} --outFileName ${convertedFILE_} --inputFormat hicpro --outputFormat cool 
 
 done
-
-
