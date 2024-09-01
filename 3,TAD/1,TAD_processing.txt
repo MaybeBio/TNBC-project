@@ -1,1 +1,27 @@
+理论上来说，2区室模块中compartment分析使用GENOVA+dchic软件，实际上并不统一。
+1，TAD上游识别分析：使用40kb及以下分辨率数据，同样以mcool文件起步
+（1）使用hicexplorer中的hicfindTAD识别TAD：
+对于TAD分析，hicexplorer官网文档指南中还有其他分析处理函数，此处原本打算合并40kb分辨率下的TAD数据，使用hicMergeDomains（合并TAD），但是实际上合并数据会有问题（在TAD层面上合并），所以暂时只能直接识别，见脚本TAD_find_merge.sh，可以两步分开来。
+（2）寻找差异TAD，细节见【bishe】流程记录1word，
+寻找差异TAD，hicDifferentialTAD函数，但是此处分析出来的TAD与传统依据bed边界分析TAD差异不同，见diff_TAD.sh脚本；
+后续参考能对接hicexplorer+使用传统bed边界角度分析TAD差异与否的方法，参考https://github.com/wikk-chy/diff_tad_type，
+见diffTAD/statdiffTAD.sh脚本，对于结果使用diffTAD/type.sh进行统计，统计结果见diffTAD/diffTAD.txt，整体输出文件见文件夹diffTAD.
+可以另外参考UO_project_2021/05_differential_tads，进一步探索差异TAD分析方法
+（3）hicexplorer中其他的TAD处理函数，
+hicInterIntraTAD函数，提取和计算不同的外部间和内部TAD值和比率并绘图，主要是边界分析，该项目执行到这一步时结合GENOVA中的ATA进行边界破坏分析验证；
+见interintra/hicInterIntraTAD.sh脚本，其余文件输出见interintra/文件夹
+（4）TAD绘图：
+hicplotTAD函数，本质上还是IGV+多组学track那套，可以联系1中的juicebox的track+搭配上此模块中的TAD的bed坐标文件；
+主要参数有绘图注释.ini文件，该文件主要是提供比对的TAD以及其他多组学track文件，示例见plot TAD/其中各种ini配置文件，
+脚本见plot TAD/plot_TAD(_2).sh，示例见文件夹plot TAD/
+（5）TAD统计：
+主要是尺寸size、大小统计等，见TAD_stat/文件夹，其中脚本见TAD_Width.sh等，使用的py脚本参考https://github.com/magmarshh/TADWidth?tab=readme-ov-file
+
+2，GENOVA中的TAD分析模块
+
+
+3，其他TAD分析可以深入部分：
+（1）1中差异TAD部分，实际上可以在边界上进行CTCF结合位点分析，注意差异TAD有很多类型，不是笼统地在所有TAD边界上分析；
+（2）进一步结合SE以及CRC部分；
+（3）另外就是如何在
 
