@@ -37,7 +37,31 @@ cmdRun.txt是执行hicpro_collectStats.sh脚本自然记录下来的命令行she
 总之，这里的统计sh+py图示结果，与（1）中hicpro自己结果比较
 (3)hic_results/matrix文件夹中的matrix+bed文件（有raw以及iced文件夹，该项目主要使用raw文件夹中的配对矩阵文件），以及data/中的allvalidpairs文件，是后续hic分析处理的核心数据，也是hicpro质控输出的主要矩阵数据
 6,hicpro结果矩阵文件格式转换：从hicpro数据格式转换为其他数据格式，主要用于后续各种下游数据处理软件处理对接
-(1)转换为hic文件：使用hicpro官网中的hicpro2juicebox.sh脚本
+(1)转换为hic格式：使用hicpro官网中的hicpro2juicebox.sh脚本，hicexplorer等工具暂时无法转换
 执行该项目时使需要安装juicer官网对应java软件，注意官主要是juicer_tools，注意软件在juicebox还是在该开发实验室的其他juicer相关维护仓库中，另外注意安装的java软件版本，该项目使用v1，v2处于开发维护debug中
+(2)转换为h5格式：使用hicexplorer（https://github.com/deeptools/HiCExplorer）
+参考https://hicexplorer.readthedocs.io/en/latest/content/tools/hicConvertFormat.html，有shell脚本hicpro_to_h5.sh
+(3)转换为cool、mcool格式：使用hicexplorer或hic2cool（https://github.com/4dn-dcic/hic2cool）
+前者参考https://hicexplorer.readthedocs.io/en/latest/content/tools/hicConvertFormat.html
+实际执行过程中尝试：
+①hicpro的bed+matrix使用hicexplorer，指定分辨率转换为cool文件，见hicpro2mcool脚本
+接着使用hicexplorer将cool数据合并为mcool格式，
+但该格式后续在GENOVA中处理有问题，并没有经过矩阵矫正等操作，
+此处矫正cool/mcool数据格式有两个方法，使用hic2cool或者hicexplorer中相应的矫正流程，
+使用hic2cool的cooler balance，在mcool水平上取出每个分辨率的cool格式进行，见cooler_balance.sh脚本；
+使用hicexplorer的hicnorm+hiccorrect，见cool_hicnorm_hiccorrect.sh脚本。
+！！！！但因为后续存疑，以及转换多次变更软件，所以①转换之后的mcool文件并没有使用，待验证处理
+②hicpro的matrix+bed使用hicexplorer，指定分辨率转化为cool格式，
+cool再使用hicexplorer中的矫正方法，然后合并为mcool格式，见脚本hicpro_cool_mcool.sh,本项目采用的是该法！！！
+
+采用法②理由：
+为什么没有采用hic 2 cool的策略，是因为hicpro只有matrix+bed是一手的原始输出数据，hicpro转换为juicer的hic数据格式并不是靠谱（涉及到jucier版本+转换出来的hic格式后续软件无法对接+分辨率混乱等问题，相当于二手数据），所以策略上还是采用了hicpro原生数据格式直接转换为cool，即hicpro 2 cool，而不是hic 2 cool策略
 
 
+实际上使用hicexplorer工具可以从上游hicpro数据格式直接进行转换，所以该项目一般使用hicpro原生数据格式，以及转换后的hic格式为输入
+①hicpro原生数据格式（matrix+bed）转换为cool等数据格式，该项目中没有使用该法转换后的mcool数据继续，有脚本hicpro2mcool.sh
+②hicpro经过juicer脚本转换为hic数据格式后，再使用hicexplorer转换为cool、mcool等格式——>理论上hicexplorer转换模块与hic2cool一致，但是转换为cool格式、mcool格式需要经过后续质控处理，
+而hicexplorer使用较多、功能多、维护丰富、经验多可参考，
+所以本项目使用的是脚本处理后的hic数据格式用hicexplorer转换为cool以及mcool格式，
+注意mcool是包含了多分辨率bin size信息的cool文件集合，所以在转换时需要注意分辨率设置问题
+！转换为mcool文件之后，需要使用
