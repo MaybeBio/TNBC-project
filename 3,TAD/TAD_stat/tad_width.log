@@ -1,0 +1,97 @@
+nohup: ignoring input
+Traceback (most recent call last):
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 236, in <module>
+    main()
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 224, in main
+    width_counts = get_user_bin_widths(tad_df, numeric_bins)
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 64, in get_user_bin_widths
+    if tad_width <= int(numeric_bins[0]):
+ValueError: invalid literal for int() with base 10: '10000-50000+'
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_HMEC_domains.bed is:  18.812689842325323
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_HMEC_domains.bed is:  18.747143998186747
+Traceback (most recent call last):
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 236, in <module>
+    main()
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 224, in main
+    width_counts = get_user_bin_widths(tad_df, numeric_bins)
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 64, in get_user_bin_widths
+    if tad_width <= int(numeric_bins[0]):
+ValueError: invalid literal for int() with base 10: '10000-50000+'
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_BT549_domains.bed is:  18.864476013233283
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_BT549_domains.bed is:  18.747143998186747
+Traceback (most recent call last):
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 236, in <module>
+    main()
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 224, in main
+    width_counts = get_user_bin_widths(tad_df, numeric_bins)
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 64, in get_user_bin_widths
+    if tad_width <= int(numeric_bins[0]):
+ValueError: invalid literal for int() with base 10: '10000-50000+'
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_HCC70_domains.bed is:  18.917714378862474
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_HCC70_domains.bed is:  18.872674880270605
+Traceback (most recent call last):
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 236, in <module>
+    main()
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 224, in main
+    width_counts = get_user_bin_widths(tad_df, numeric_bins)
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 64, in get_user_bin_widths
+    if tad_width <= int(numeric_bins[0]):
+ValueError: invalid literal for int() with base 10: '10000-50000+'
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_MB231_domains.bed is:  18.920623691892448
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_MB231_domains.bed is:  18.872674880270605
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_HMEC_domains.bed is:  18.812689842325323
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_HMEC_domains.bed is:  18.747143998186747
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_BT549_domains.bed is:  18.864476013233283
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_BT549_domains.bed is:  18.747143998186747
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_HCC70_domains.bed is:  18.917714378862474
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_HCC70_domains.bed is:  18.872674880270605
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_MB231_domains.bed is:  18.920623691892448
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//40000_MB231_domains.bed is:  18.872674880270605
+Traceback (most recent call last):
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 236, in <module>
+    main()
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 224, in main
+    width_counts = get_user_bin_widths(tad_df, numeric_bins)
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 64, in get_user_bin_widths
+    if tad_width <= int(numeric_bins[0]):
+ValueError: invalid literal for int() with base 10: '10000-50000+'
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_HMEC_domains.bed is:  18.036499445627157
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_HMEC_domains.bed is:  17.98815209769054
+Traceback (most recent call last):
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 236, in <module>
+    main()
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 224, in main
+    width_counts = get_user_bin_widths(tad_df, numeric_bins)
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 64, in get_user_bin_widths
+    if tad_width <= int(numeric_bins[0]):
+ValueError: invalid literal for int() with base 10: '10000-50000+'
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_BT549_domains.bed is:  18.16744646428732
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_BT549_domains.bed is:  17.98815209769054
+Traceback (most recent call last):
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 236, in <module>
+    main()
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 224, in main
+    width_counts = get_user_bin_widths(tad_df, numeric_bins)
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 64, in get_user_bin_widths
+    if tad_width <= int(numeric_bins[0]):
+ValueError: invalid literal for int() with base 10: '10000-50000+'
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_HCC70_domains.bed is:  18.220969858497817
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_HCC70_domains.bed is:  18.095067301607052
+Traceback (most recent call last):
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 236, in <module>
+    main()
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 224, in main
+    width_counts = get_user_bin_widths(tad_df, numeric_bins)
+  File "/mnt/disk4/haitao/software/TADWidth/TADWidth_piechart.py", line 64, in get_user_bin_widths
+    if tad_width <= int(numeric_bins[0]):
+ValueError: invalid literal for int() with base 10: '10000-50000+'
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_MB231_domains.bed is:  18.259370411854157
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_MB231_domains.bed is:  18.095067301607052
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_HMEC_domains.bed is:  18.036499445627157
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_HMEC_domains.bed is:  17.98815209769054
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_BT549_domains.bed is:  18.16744646428732
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_BT549_domains.bed is:  17.98815209769054
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_HCC70_domains.bed is:  18.220969858497817
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_HCC70_domains.bed is:  18.095067301607052
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_MB231_domains.bed is:  18.259370411854157
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq//20000_MB231_domains.bed is:  18.095067301607052
