@@ -1,1 +1,28 @@
+经过流程1.txt处理之后获得了hic、cool等最终数据格式（以cool为主），接下来就是对hic数据的上游处理分析，并不涉及到分析compartment、TAD、loop等结构
+1,hic质控的图示：主要是顺反互作比例图示
+见1.txt中hicpro自身的质控图hic_result/pic
+以及对hicpro结果质控stat文件重整理的统计图示，见cis_trans_ratio文件夹
 
+2,hic矩阵数据的热图展示：hic、cool等数据格式都可以使用下游处理软件进行热图+track展示
+此处使用jucier lab的juicebox工具，在linux中需要使用java命令，
+主要是hic格式数据在juicebox中进行对比可视化，同时搭配各种组学track，类型于IGV的操作，各种比对模式操作见官网(https://github.com/aidenlab/Juicebox)以及【bishe】流程记录1 word。
+除了juicebox，要展示hic矩阵热图，还可以使用higlass以及hicplotter软件
+
+3,样本间相关性热图：用于检测每个样本中重复样本之间的相似性，应该就是计算校正分层系数SCC
+参考https://github.com/dozmorovlab/UO_project_2021/tree/main/02_visualize_replicates/StratumAdjustedCorrelationCoefficients
+中的脚本StratumAdjustedCorrelationCoefficients或MDS，或者参考https://github.com/dozmorovlab/PDXHiC_supplemental这里的Fig4_HiC_misc。
+需要获取mcool文件，以及安装hicrep(https://github.com/dejunlin/hicrep)获取相似性矩阵文件,依据PDX nature文献参考，使用20kb分辨率数据,shell脚本见HiCrep.sh；
+hicrep处理之后的矩阵文件，见例BT549_HCC70,BT549_HMEC,HCC70_HMEC等txt，
+参考(https://github.com/dozmorovlab/UO_project_2021/blob/main/02_visualize_replicates/StratumAdjustedCorrelationCoefficients/2_hicrep_heatmap.R),
+使用脚本hicrep_heatmap.R，输出结果文件见例scc_heatmapxxx.jpg，正式输出结果见10kb/20kb分辨率输出文件夹，有矩阵文件+图示，微修对角线为1。
+另外可以参考(https://github.com/dozmorovlab/PDXHiC_supplemental/tree/main/Fig4_HiC_misc)中的readme+2/3/4的Rmd文件，也是用于处理hic矩阵的相似性问题
+
+4，距离互作衰减曲线（Distance Decay曲线，类似于RCP，基因组互作-距离曲线）：
+参考https://github.com/dozmorovlab/PDX-HiC_processingScripts中7.hicPlotDistVsCounts.sh，
+以及https://github.com/dozmorovlab/UO_project_2021/tree/main/02_visualize_replicates中的distance-decay，
+使用hicexplorer中的hicPlotDistVsCounts函数，参考官网文档，分辨率取50kb至少（》50kb，小的不适合），见脚本hicPlotDistVsCounts.sh，可以分开perchr绘制也可以全局，输出结果例见文件夹RCP。
+实际上GENOVA以及HiTC等hic数据下游处理软件都能绘制RCP曲线，另外探索。
+
+5，其他hic全局3D基因组feature：
+(1)参考PDX nature文献模块，
+(2)以及GENOVA、hicexplorer等多模块软件能接着做的部分
