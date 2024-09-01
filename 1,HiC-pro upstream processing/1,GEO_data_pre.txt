@@ -1,13 +1,16 @@
 #GEO、ENCODE数据库搜索主题、数据类型（以Hi-C数据为主）
 1，整理数据为表格，表格形式见TNBC_vs_HMEC整理表格——【bishe】data收集/修改后（见Ali cloud）
+
 2，数据下载：
 SRA Run Selector——>Accession List——>筛选所需要的SRR序列号文件txt
 prefetch --option-file 待下载srr.txt
 nohup prefetch --maxsize 50G --option-file SRR.txt >& log文件 &     #--maxsize指定数据最大下载限制
 #注意prefetch以及常用的fastq-dump都需要到github的SRA Toolkit仓库中下载取用，一般下1个SRA Toolkit就够了
+
 3,数据解压：
 #建议使用fastqer-dump解压sra数据，比旧fastq-dump更快，也在SRA Toolkit里
 fasterq-dump -e 10 sra文件  #-e是线程，注意reads是单端还是双端,视数据质控需求添加其他参数
+
 4，hic-pro软件安装+数据预处理
 (1)hic-pro软件安装细节见【bishe】流程记录1 word（见Ali cloud）
 (2)数据预处理：
@@ -27,6 +30,7 @@ fasterq-dump -e 10 sra文件  #-e是线程，注意reads是单端还是双端,�
 即第一次分rep的fq进行hicpro分析分辨率，理论上可以使用hicpro的输出数据格式matrix+bed或者是validpairs等进行合并，或者是转换为cool/mcool、hic、h5等数据格式之后依然可以直接合并——暂时没有找到该方面的方法以及工具，所以本项目直接返回源头合并上游fq文件，从头再来。据评估，500G fq/样本，一共4个样本，运行15~20线程，耗时7天左右（可以查看日志文件data1、data2.log）。
 (4)hic-pro中的配置文件config-hicpro.txt等衍生同类文件，设置细节见【bishe】流程记录1 word，具体结果形式可参考上传的config-hicpro.txt（处理TNBC中2类）以及config-hicpro_mb231.txt（处理TNBC中最后一类MB231），主要依据github软件官网修改文件依赖路径+服务器执行参数等，以及注意分辨率参数的设置（bin size本项目设置为10,20,40,100,500kb），建议阅读官网手册以及自己分析3层次等结构数据需求设置对应的分辨率，以及注意自己数据的大小.
 理论上10kb是就能够分析loop了，当然数据精度需要进一步查询paper确定
+
 5,hicpro分析结果处理：
 (1) hicpro样本质控报告：hic_results/pic
 参考https://github.com/nservant/HiC-Pro/blob/master/doc/MANUAL.md，该项目样本图见hicpro_qc_plot文件夹，主要关注顺反互作比例，与下列脚本处理相同，解读细节见【bishe】流程记录1 word
@@ -36,6 +40,7 @@ cmdRun.txt是执行hicpro_collectStats.sh脚本自然记录下来的命令行she
 针对mergestat文件的二次处理，即统计实际情况下的顺反互作比例，对已经合并rep的样本的统计，使用py脚本stat_ratio_merged.py，结果在对应txt中，注意处理的py脚本没有矫正过，待矫正！
 总之，这里的统计sh+py图示结果，与（1）中hicpro自己结果比较
 (3)hic_results/matrix文件夹中的matrix+bed文件（有raw以及iced文件夹，该项目主要使用raw文件夹中的配对矩阵文件），以及data/中的allvalidpairs文件，是后续hic分析处理的核心数据，也是hicpro质控输出的主要矩阵数据
+
 6,hicpro结果矩阵文件格式转换：从hicpro数据格式转换为其他数据格式，主要用于后续各种下游数据处理软件处理对接
 (1)转换为hic格式：使用hicpro官网中的hicpro2juicebox.sh脚本，hicexplorer等工具暂时无法转换
 执行该项目时使需要安装juicer官网对应java软件，注意官主要是juicer_tools，注意软件在juicebox还是在该开发实验室的其他juicer相关维护仓库中，另外注意安装的java软件版本，该项目使用v1，v2处于开发维护debug中
@@ -55,13 +60,8 @@ cmdRun.txt是执行hicpro_collectStats.sh脚本自然记录下来的命令行she
 cool再使用hicexplorer中的矫正方法，然后合并为mcool格式，见脚本hicpro_cool_mcool.sh,本项目采用的是该法！！！
 
 采用法②理由：
-为什么没有采用hic 2 cool的策略，是因为hicpro只有matrix+bed是一手的原始输出数据，hicpro转换为juicer的hic数据格式并不是靠谱（涉及到jucier版本+转换出来的hic格式后续软件无法对接+分辨率混乱等问题，相当于二手数据），所以策略上还是采用了hicpro原生数据格式直接转换为cool，即hicpro 2 cool，而不是hic 2 cool策略
-
-
-实际上使用hicexplorer工具可以从上游hicpro数据格式直接进行转换，所以该项目一般使用hicpro原生数据格式，以及转换后的hic格式为输入
-①hicpro原生数据格式（matrix+bed）转换为cool等数据格式，该项目中没有使用该法转换后的mcool数据继续，有脚本hicpro2mcool.sh
-②hicpro经过juicer脚本转换为hic数据格式后，再使用hicexplorer转换为cool、mcool等格式——>理论上hicexplorer转换模块与hic2cool一致，但是转换为cool格式、mcool格式需要经过后续质控处理，
-而hicexplorer使用较多、功能多、维护丰富、经验多可参考，
-所以本项目使用的是脚本处理后的hic数据格式用hicexplorer转换为cool以及mcool格式，
-注意mcool是包含了多分辨率bin size信息的cool文件集合，所以在转换时需要注意分辨率设置问题
-！转换为mcool文件之后，需要使用
+为什么没有采用hic 2 cool的策略，是因为hicpro只有matrix+bed是一手的原始输出数据，hicpro转换为juicer的hic数据格式并不是靠谱（涉及到jucier版本+转换出来的hic格式后续软件无法对接+分辨率混乱等问题，相当于二手数据），所以策略上还是采用了hicpro原生数据格式直接转换为cool，即hicpro 2 cool，而不是hic 2 cool策略；
+需要注意的问题：分辨率以及cool数据的矫正方法，建议统一采用同种工具进行数据处理，所以数据格式转换使用hicexplorer统一处理
+(4)总之通用处理流程：
+hicpro allvalidpairs——>juicer_tools+hicpro官方脚本转换为hic文件——>(hic数据可以使用juicer进行矫正)——>hic2cool/hicexplorer转换为cool/mcool文件——>使用对应转换软件进行矫正cool矩阵(cooler balance/hicexplorer hicnorm_hiccorrect)
+hicpro matrix+bed——>hicexplorer转换为cool格式——>hicexplorer对cool矫正再合并mcool，该项目采用该法，注意：hicexplorer矫正流程并不是很明确，建议多查阅官方教程指示+issue示例+使用该工具CNS等文献代码处理细节进行明确！！！
