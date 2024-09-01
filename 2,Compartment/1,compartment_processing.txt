@@ -1,6 +1,7 @@
 区室分析主要输入文件，为上游分析1中>=100kb分辨率的hic矩阵文件（mcool数据格式），除开个别特定模块所需分辨率要求，区室分析主模块选取分辨率>=100kb;
 绝大部分模块分析由R包GENOVA完成，且遵循官方github中vignettes，注意指南中尚且有很多模块未实现尝试！解读细节见【bishe】流程记录1 word
 注意mcool文件使用load_contacts函数导入GENOVA中的参数设置，是否需要再矫正？
+参考https://github.com/dozmorovlab/PDXHiC_supplemental/tree/main/Fig5_HiC_ABcompartments
 1,AB compartment分析：主要是分析样本内A/B区室状况，见ABsaddle.Rmd脚本1~1700行左右
 （1）compartment_score函数主要绘制区室得分，即AB区室PCA轴上得分正负图，分析哪些区域是A区室，哪些区域是B区室；
 （2）saddle函数用于定量化AA/BB/AB 3类区室之间的交互情况，即展示交互数量和交互强度的热图估计，注意脚本中有2处saddle热图绘制（第1处使用GENOVA的saddle函数，第2次自己数据分析+绘图函数处理）；
@@ -13,13 +14,37 @@ Compartmentalization score分析，也是 (AA+BB) / (AB+BA)比例分析，为PDX
 可以将Contact enrichment+Compartmentalization score理解为compartment-strength/saddle-strength的个性化衍生数据处理分析！！！
 
 所有输出结果见100kb_genova、500kb_genova、compartment upstream（同样是以上模块的分析结果，主要是一些次要结果图示）文件夹
+
 2,AB区室转换模块分析:此处为区室分析的重点，主要使用100kb分辨率数据
 主要使用dchic（https://github.com/ay-lab/dcHiC）分析转换区室情况，另外使用R脚本分析下游数据
 （1）dchic主要脚本见run_dchic.sh：
 主要修改dchicf.r的路径（修改成dchic软件安装之后最外层的dchicf.r脚本路径），以及输入文件input.HMEC_TNBC.txt（使用hicpro原生输出数据，本项目使用raw中的matrix+bed），rep分类要分类好；
 另外注意input的txt中matrix+bed最好移除异常chr数据（这在上游hicpro的处理中就可以进行，只保留1-22+XY）,另外也建议移除chrY，依据官方的指示；
 dchic输出结果目录细节解读见【bishe】流程记录1 word以及官网github；
-
+注意DifferentialResult/HMEC_BT549_100Kb/fdr_result/differential.intra_sample_group.Filtered.pcOri.bedGraph为经过dchic默认padj过滤的结果文件（fdr阈值）——filtered，
+DifferentialResult/HMEC_BT549_100Kb/fdr_result/differential.intra_sample_group.pcOri.bedGraph没有经过过滤，可以自行设置阈值——full。
 dchic运行脚本中有关于loop的分析模块，本项目在运行时没有执行，后续可以尝试!!!
-（2）dchic下游R分析：
-主要是
+（2）dchic有区室的IGV图，可以搭配其他track，当然juicebox中也可以搭配区室track+其他组学track
+
+dchic下游R分析：注意所有处理是基于（1）中的filterd还是full（即有没有设置fdr阈值），见01+02+03+04等Rmd脚本，参考PDX nature文献，
+（1）绘制区室转换的核型图KaryoploteR，理论上可以搭配其他track，图例见BT549_karyplot、TNBC_karyplot文件夹
+（2）区室转换（padj/fdr过滤前后）表格、静态区室比较图展示，见文件夹AB static comparison：
+主要是转换的区室长度（size）、数目、长度占chr比例等，以及HMEC与TNBC对应转换区室的各种比对量（有自定义比对计算量），
+区室转换的饼图、桑基详细图、转换趋势（每类区室转换类型下的EV分布箱线图+小提琴图）等
+（3）区室转换区室覆盖/overlap的gene：同样注意是filtered区域还是full区室转换区域的覆盖
+gene的数目、以及与AB区室的相交情况即upset图，注意gene要做符号转换，主要是ensembl和symbol之间，参考clusterprofiler开发者的相关R包！
+gene的表达热图，gene表达值与所覆盖区域的AB PC1/特征向量EV值的线性拟合（回归分析），注意与区域overlap的gene寻找的方法（1种是直接使用gene body全长overlap，另外1种是定义该gene的启动子，一般是上下游1kb等定义，当然要注意gene在哪条链上，注意对应bed计算操作——当然也可以直接使用clusterprofiler开发者开发的R包，用于获取启动子等）；
+以及这些gene的富集分析，使用clusterprofiler绘制的各种图，也使用metascape绘制，PDX nature文献中使用更多的富集分析数据库，本项目没有用上相应代码，主要是做富集分析的时候————这里获取的AB转换区域的gene，或BA转换区域的gene，唯一有的指标是被覆盖区域的PC1/EV值的变化，但是这个指标与常规DEG的富集分析不一样，后者用的是logFC指标，但是此处没有，不知道如何解释，而且相同区域内的gene共享EV值变化，这与logFC的指标明显不一样——所以此处导师argue如何解释，暂时无法解释所以就没对这些gene做clusterprofiler的GSEA了，但是仅仅提供gene名字可以做过表达分析（也就是超几何检验），所以metascape还是可以使用的，见AB/BA等txt文件+AB/BA区室gene压缩文件；
+PDX代码分析中还使用了其他文献发表+数据库的癌症特征gene，做交集分析、标记之类，本项目也没有使用，具体列表可参考https://github.com/mdozmorov/Cancer_notes.
+（4）其他可以做的模块：
+区室转换gene的其他表观信号，主要是ATAC以及H3K27ac等，使用相关R包等；
+联系SE、CRC等；
+hicexplorer以及GENOVA中的区室模块等
+
+3,RNA-seq处理部分：
+（1）上游fq文件操作，该项目没有使用传统STAR（tophat）等，而是使用salmon，可以直接使用fq文件定量化转录本，基因组版本要配套无论是gtf还是bed等，细节见【bishe】流程记录1 word。
+相关脚本见salmon.sh以及salmon_PE/SE.sh等脚本
+（2）DEG分析：FDR0.05+logFC1
+见脚本01_TPMCalc_DataPreproc.R，02_DEG_Analysis_edgeR.Rmd等，与PDX脚本有区别，可以对比，结果见文件夹DEG，
+再联系AB区室就是AB/BA_exp表格文件
+
