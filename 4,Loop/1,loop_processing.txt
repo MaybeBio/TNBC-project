@@ -1,1 +1,5 @@
+进行loop分析，同样使用1中的mcool文件，建议使用10kb及以下，本项目可以结合20kb数据，
+主要参考https://github.com/dozmorovlab/PDXHiC_supplemental/tree/main/Fig6_HiC_Loops、Fig7_HiC_Enrichments、00_preprocessing.Rmd
+1，loop结构识别：使用工具mustache
+见脚本loop_call.sh
 
