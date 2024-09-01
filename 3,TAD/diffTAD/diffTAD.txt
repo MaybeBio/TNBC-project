@@ -1,0 +1,108 @@
+  5269 40000_BT549_diff/control_tad.bed
+   695 40000_BT549_diff/diff_tad.bed
+  4982 40000_BT549_diff/test_tad.bed
+ 10946 total
+   18 40000_BT549_diff/test_to_control_fusion.csv
+  138 40000_BT549_diff/test_to_control_separate.csv
+  156 40000_BT549_diff/test_to_control_shift.csv
+  312 total
+separate
+61
+40000_BT549
+
+  5269 40000_HCC70_diff/control_tad.bed
+   799 40000_HCC70_diff/diff_tad.bed
+  4793 40000_HCC70_diff/test_tad.bed
+ 10861 total
+   11 40000_HCC70_diff/test_to_control_fusion.csv
+  286 40000_HCC70_diff/test_to_control_separate.csv
+  177 40000_HCC70_diff/test_to_control_shift.csv
+  474 total
+separate
+119
+40000_HCC70
+
+  5269 40000_MB231_diff/control_tad.bed
+  1207 40000_MB231_diff/diff_tad.bed
+  4717 40000_MB231_diff/test_tad.bed
+ 11193 total
+   24 40000_MB231_diff/test_to_control_fusion.csv
+  493 40000_MB231_diff/test_to_control_separate.csv
+  286 40000_MB231_diff/test_to_control_shift.csv
+  803 total
+separate
+217
+40000_MB231
+
+  8502 20000_BT549_diff/control_tad.bed
+  1406 20000_BT549_diff/diff_tad.bed
+  7273 20000_BT549_diff/test_tad.bed
+ 17181 total
+   32 20000_BT549_diff/test_to_control_fusion.csv
+  589 20000_BT549_diff/test_to_control_separate.csv
+  304 20000_BT549_diff/test_to_control_shift.csv
+  925 total
+separate
+229
+20000_BT549
+
+  8502 20000_HCC70_diff/control_tad.bed
+  1339 20000_HCC70_diff/diff_tad.bed
+  6829 20000_HCC70_diff/test_tad.bed
+ 16670 total
+   27 20000_HCC70_diff/test_to_control_fusion.csv
+  750 20000_HCC70_diff/test_to_control_separate.csv
+  289 20000_HCC70_diff/test_to_control_shift.csv
+ 1066 total
+separate
+263
+20000_HCC70
+
+  8502 20000_MB231_diff/control_tad.bed
+  1680 20000_MB231_diff/diff_tad.bed
+  6634 20000_MB231_diff/test_tad.bed
+ 16816 total
+    38 20000_MB231_diff/test_to_control_fusion.csv
+  1100 20000_MB231_diff/test_to_control_separate.csv
+   364 20000_MB231_diff/test_to_control_shift.csv
+  1502 total
+separate
+420
+20000_MB231
+
+ 11299 10000_BT549_diff/control_tad.bed
+  1845 10000_BT549_diff/diff_tad.bed
+  7025 10000_BT549_diff/test_tad.bed
+ 20169 total
+    39 10000_BT549_diff/test_to_control_fusion.csv
+  1391 10000_BT549_diff/test_to_control_separate.csv
+   381 10000_BT549_diff/test_to_control_shift.csv
+  1811 total
+separate
+474
+10000_BT549
+
+ 11299 10000_HCC70_diff/control_tad.bed
+  1921 10000_HCC70_diff/diff_tad.bed
+  8138 10000_HCC70_diff/test_tad.bed
+ 21358 total
+    62 10000_HCC70_diff/test_to_control_fusion.csv
+  1192 10000_HCC70_diff/test_to_control_separate.csv
+   430 10000_HCC70_diff/test_to_control_shift.csv
+  1684 total
+separate
+386
+10000_HCC70
+
+ 11299 10000_MB231_diff/control_tad.bed
+  1833 10000_MB231_diff/diff_tad.bed
+  6118 10000_MB231_diff/test_tad.bed
+ 19250 total
+     8 10000_MB231_diff/test_to_control_fusion.csv
+  1862 10000_MB231_diff/test_to_control_separate.csv
+   318 10000_MB231_diff/test_to_control_shift.csv
+  2188 total
+separate
+590
+10000_MB231
+

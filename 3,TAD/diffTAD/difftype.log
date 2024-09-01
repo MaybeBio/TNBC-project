@@ -1,0 +1,19 @@
+nohup: ignoring input
+bedtools intersect -a 40000_BT549_diff/diff_tad.bed -b 40000_BT549_diff/control_tad.bed -wa -wb > 40000_BT549_diff/differential_tad_control_tad_intersect.tsv
+bedtools intersect -a 40000_BT549_diff/control_tad.bed -b 40000_BT549_diff/diff_tad.bed -wa -wb > 40000_BT549_diff/control_tad_differential_tad_intersect.tsv
+bedtools intersect -a 40000_HCC70_diff/diff_tad.bed -b 40000_HCC70_diff/control_tad.bed -wa -wb > 40000_HCC70_diff/differential_tad_control_tad_intersect.tsv
+bedtools intersect -a 40000_HCC70_diff/control_tad.bed -b 40000_HCC70_diff/diff_tad.bed -wa -wb > 40000_HCC70_diff/control_tad_differential_tad_intersect.tsv
+bedtools intersect -a 40000_MB231_diff/diff_tad.bed -b 40000_MB231_diff/control_tad.bed -wa -wb > 40000_MB231_diff/differential_tad_control_tad_intersect.tsv
+bedtools intersect -a 40000_MB231_diff/control_tad.bed -b 40000_MB231_diff/diff_tad.bed -wa -wb > 40000_MB231_diff/control_tad_differential_tad_intersect.tsv
+bedtools intersect -a 20000_BT549_diff/diff_tad.bed -b 20000_BT549_diff/control_tad.bed -wa -wb > 20000_BT549_diff/differential_tad_control_tad_intersect.tsv
+bedtools intersect -a 20000_BT549_diff/control_tad.bed -b 20000_BT549_diff/diff_tad.bed -wa -wb > 20000_BT549_diff/control_tad_differential_tad_intersect.tsv
+bedtools intersect -a 20000_HCC70_diff/diff_tad.bed -b 20000_HCC70_diff/control_tad.bed -wa -wb > 20000_HCC70_diff/differential_tad_control_tad_intersect.tsv
+bedtools intersect -a 20000_HCC70_diff/control_tad.bed -b 20000_HCC70_diff/diff_tad.bed -wa -wb > 20000_HCC70_diff/control_tad_differential_tad_intersect.tsv
+bedtools intersect -a 20000_MB231_diff/diff_tad.bed -b 20000_MB231_diff/control_tad.bed -wa -wb > 20000_MB231_diff/differential_tad_control_tad_intersect.tsv
+bedtools intersect -a 20000_MB231_diff/control_tad.bed -b 20000_MB231_diff/diff_tad.bed -wa -wb > 20000_MB231_diff/control_tad_differential_tad_intersect.tsv
+bedtools intersect -a 10000_BT549_diff/diff_tad.bed -b 10000_BT549_diff/control_tad.bed -wa -wb > 10000_BT549_diff/differential_tad_control_tad_intersect.tsv
+bedtools intersect -a 10000_BT549_diff/control_tad.bed -b 10000_BT549_diff/diff_tad.bed -wa -wb > 10000_BT549_diff/control_tad_differential_tad_intersect.tsv
+bedtools intersect -a 10000_HCC70_diff/diff_tad.bed -b 10000_HCC70_diff/control_tad.bed -wa -wb > 10000_HCC70_diff/differential_tad_control_tad_intersect.tsv
+bedtools intersect -a 10000_HCC70_diff/control_tad.bed -b 10000_HCC70_diff/diff_tad.bed -wa -wb > 10000_HCC70_diff/control_tad_differential_tad_intersect.tsv
+bedtools intersect -a 10000_MB231_diff/diff_tad.bed -b 10000_MB231_diff/control_tad.bed -wa -wb > 10000_MB231_diff/differential_tad_control_tad_intersect.tsv
+bedtools intersect -a 10000_MB231_diff/control_tad.bed -b 10000_MB231_diff/diff_tad.bed -wa -wb > 10000_MB231_diff/control_tad_differential_tad_intersect.tsv
