@@ -1,0 +1,3143 @@
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+# Set up the environment
+library(knitr)
+opts_chunk$set(cache.path='cache/', fig.path='img/', cache=F, cache.lazy = FALSE, tidy=T, fig.keep='high', echo=F, dpi=100, warnings=F, message=F, comment=NA, warning=F, results='as.is', fig.width = 10, fig.height = 6) #out.width=700, 这条代码还是保留，主要是warning消息可以直接无视等
+library(pander)
+panderOptions('table.split.table', Inf)
+set.seed(1)
+library(dplyr)
+options(stringsAsFactors = FALSE)
+setwd("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script6/AB_newcool/ABcompartment/")
+```
+
+# Libraries  
+
+```{r libraries}
+library(GENOVA) # remotes::install_github("robinweide/GENOVA", ref = "dev")
+library(rCGH)
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(strawr) # remotes::install_github("aidenlab/straw/R")
+library(grid)
+library(gridExtra)
+library(ggplot2)
+library(ggrepel)
+library("ggsci")
+library(scales)
+# scales::show_col(pal_lancet("lanonc")(8))
+mycols = pal_lancet("lanonc")(8)
+#调色板，主要是颜色比对，可以去掉#之后再查看
+#"#00468BFF" "#ED0000FF" "#42B540FF" "#0099B4FF" "#925E9FFF" "#FDAF91FF" "#AD002AFF""#ADB6B6FF"
+library(grid)
+library(gridExtra)
+library(ggprism)
+library(cowplot)
+library(patchwork)
+library("ggstatsplot") #主要就是后面对应的箱线图的时候需要进行美化，可以选用其他的ggplot函数
+```
+
+# Settings 注意这里是使用矫正norm+correct之后的mcool文件，对照之前未校正的mcool文件进行的二次脚本
+
+```{r settings}
+# .mcool files移植所有的mcool文件，比对上都用hic-pro上游合并的
+fileNamemcool1 <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script5/merge_fq_now/HMEC.mcool"  #HMEC
+fileNamemcool2 <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script5/merge_fq_now/BT549.mcool"  #BT549
+fileNamemcool3 <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script5/merge_fq_now/HCC70.mcool"  #HCC70
+fileNamemcool4 <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script5/merge_fq_now/MB231.mcool" #MB231
+
+# For saddle plot
+nbins = 50 # Number of bins  绘制鞍点时候区室比较分数应被划分的分位，即划分成几份，比如说分成50份等，无定论，所以这里还是选用脚本里的数据
+```
+```{r centromeres}
+# Centromeres from rCGH 着丝粒数据，#提取染色体的中心粒/着丝粒区域，就是处理问题区域（一般着丝粒以及端粒区域数据需要人工去除）
+hg19_chrom <- hg19
+hg19_chrom$chrom[hg19_chrom$chrom == 23] <- "X"
+hg19_chrom$chrom[hg19_chrom$chrom == 24] <- "Y"
+
+# 将chrom列中的数字转换为chr格式，否则后面数据输入会有问题（因为此处hg19的chrom列中是数字形式而非chr形式）
+#注意，这里的hg_chrom换成了hg_chrom_zht，如果后面有问题，就再改回去，总之需要的地方chrxx与xx一起改
+hg19_chrom_zht<-hg19_chrom
+hg19_chrom_zht$chrom <- paste("chr", hg19_chrom_zht$chrom, sep = "")
+centromeres <- hg19_chrom_zht[, c("chrom", "centromerStart", "centromerEnd")]
+```
+
+# Load data 注意，从这里开始load的数据就是矫正之后的mcool文件，另外注意，因为运行的是区室层面的分析，所以只建议处理40,100,500kb的数据，另外颜色方面的标注是该脚本中所有出图都一致的，所以这里的颜色对应要一致
+需要注意，原先call出来的mcool文件就是因为此处load数据的时候balance的问题才cooler balance了
+目前使用矫正之后的数据并没有cooler balance过
+balancing	
+TRUE (default) will perform matrix balancing for .cooler and KR for.hic.
+github上issue之后应该可以T
+
+另外TAD等模块分析需求，此处额外添加10kb，20kb的分辨率数据
+区室分析：100kb+500kb
+TAD分析：10+20kb+40kb
+loop分析：10kb+20kb
+
+
+```{r eval=TRUE}
+#10kb
+HMEC_10kb_cool <- load_contacts(signal_path =fileNamemcool1,
+                                   sample_name = "HMEC",
+                                   resolution = 10e3,
+                                   balancing = TRUE, # this is the default
+                                   colour = "red",
+                                   centromeres = centromeres)
+BT549_10kb_cool<- load_contacts(signal_path = fileNamemcool2,
+                                   sample_name = "BT549",
+                                   resolution = 10e3,
+                                   balancing = TRUE, # this is the default
+                                   colour = "green",
+                                   centromeres = centromeres)
+HCC70_10kb_cool <- load_contacts(signal_path = fileNamemcool3,
+                                 sample_name = "HCC70",
+                                 resolution = 10e3,
+                                 balancing = TRUE, # this is the default
+                                 colour = "blue",
+                                 centromeres = centromeres)
+MB231_10kb_cool <- load_contacts(signal_path = fileNamemcool4,
+                                 sample_name = "MB231",
+                                 resolution = 10e3,
+                                 balancing = TRUE, # this is the default
+                                 colour = "purple",
+                                 centromeres = centromeres)
+```
+
+
+```{r eval=TRUE}
+#20kb
+HMEC_20kb_cool <- load_contacts(signal_path =fileNamemcool1,
+                                   sample_name = "HMEC",
+                                   resolution = 20e3,
+                                   balancing = TRUE, # this is the default
+                                   colour = "red",
+                                   centromeres = centromeres)
+BT549_20kb_cool<- load_contacts(signal_path = fileNamemcool2,
+                                   sample_name = "BT549",
+                                   resolution = 20e3,
+                                   balancing = TRUE, # this is the default
+                                   colour = "green",
+                                   centromeres = centromeres)
+HCC70_20kb_cool <- load_contacts(signal_path = fileNamemcool3,
+                                 sample_name = "HCC70",
+                                 resolution = 20e3,
+                                 balancing = TRUE, # this is the default
+                                 colour = "blue",
+                                 centromeres = centromeres)
+MB231_20kb_cool <- load_contacts(signal_path = fileNamemcool4,
+                                 sample_name = "MB231",
+                                 resolution = 20e3,
+                                 balancing = TRUE, # this is the default
+                                 colour = "purple",
+                                 centromeres = centromeres)
+```
+
+```{r eval=TRUE}
+#40kb
+HMEC_40kb_cool <- load_contacts(signal_path =fileNamemcool1,
+                                   sample_name = "HMEC",
+                                   resolution = 40e3,
+                                   balancing = TRUE, # this is the default
+                                   colour = "red",
+                                   centromeres = centromeres)
+BT549_40kb_cool<- load_contacts(signal_path = fileNamemcool2,
+                                   sample_name = "BT549",
+                                   resolution = 40e3,
+                                   balancing = TRUE, # this is the default
+                                   colour = "green",
+                                   centromeres = centromeres)
+HCC70_40kb_cool <- load_contacts(signal_path = fileNamemcool3,
+                                 sample_name = "HCC70",
+                                 resolution = 40e3,
+                                 balancing = TRUE, # this is the default
+                                 colour = "blue",
+                                 centromeres = centromeres)
+MB231_40kb_cool <- load_contacts(signal_path = fileNamemcool4,
+                                 sample_name = "MB231",
+                                 resolution = 40e3,
+                                 balancing = TRUE, # this is the default
+                                 colour = "purple",
+                                 centromeres = centromeres)
+```
+
+```{r eval=TRUE}
+#100kb
+HMEC_100kb_cool <- load_contacts(signal_path = fileNamemcool1,
+                                sample_name = "HMEC",
+                                resolution = 100e3,
+                                balancing = TRUE, # this is the default
+                                colour = "red",
+                                centromeres = centromeres)
+BT549_100kb_cool<- load_contacts(signal_path = fileNamemcool2,
+                                sample_name = "BT549",
+                                resolution = 100e3,
+                                balancing = TRUE, # this is the default
+                                colour = "green",
+                                centromeres = centromeres)
+HCC70_100kb_cool <- load_contacts(signal_path = fileNamemcool3,
+                                 sample_name = "HCC70",
+                                 resolution = 100e3,
+                                 balancing = TRUE, # this is the default
+                                 colour = "blue",
+                                 centromeres = centromeres)
+MB231_100kb_cool <- load_contacts(signal_path = fileNamemcool4,
+                                 sample_name = "MB231",
+                                 resolution = 100e3,
+                                 balancing = TRUE, # this is the default
+                                 colour = "purple",
+                                 centromeres = centromeres)
+```
+
+```{r cooler}
+#500kb
+HMEC_500kb_cool <- load_contacts(signal_path = fileNamemcool1,
+                                 sample_name = "HMEC",
+                                 resolution = 500e3,
+                                 balancing = TRUE, # this is the default
+                                 colour = "red",
+                                 centromeres = centromeres)
+BT549_500kb_cool<- load_contacts(signal_path = fileNamemcool2,
+                                 sample_name = "BT549",
+                                 resolution = 500e3,
+                                 balancing = TRUE, # this is the default
+                                 colour = "green",
+                                 centromeres = centromeres)
+HCC70_500kb_cool <- load_contacts(signal_path = fileNamemcool3,
+                                  sample_name = "HCC70",
+                                  resolution = 500e3,
+                                  balancing = TRUE, # this is the default
+                                  colour = "blue",
+                                  centromeres = centromeres)
+MB231_500kb_cool <- load_contacts(signal_path = fileNamemcool4,
+                                  sample_name = "MB231",
+                                  resolution = 500e3,
+                                  balancing = TRUE, # this is the default
+                                  colour = "purple",
+                                  centromeres = centromeres)
+```
+
+## AB compartments 试验的时候以100kb为基准，之后运行的时候就选用100+5000kb的数据
+
+### 500kb resolution
+
+```{r fig.height=12}
+allGenes <- exons(TxDb.Hsapiens.UCSC.hg19.knownGene)
+allGenes <- as.data.frame(allGenes)
+allGenes <- allGenes[allGenes$seqnames %in% unique(HMEC_500kb_cool$CHRS) , 1:3] #保留cool数据中的chr
+
+#每条染色体都计算一个区室分数
+#performs an eigenvector decomposition of the observed / expected matrix minus one
+# calculates a compartment score per chromosome arm
+
+#这里的bed可以放置其他的track，比如所是gene，open，histone
+#bed文件是一种带有3列的BED格式的数据框，包含活性染色质标记的峰。与'bedgraph'的论点相互排斥
+#所以上面用gene来替代勉强可以，但是自己有开放染色质数据以及其他数据，是完全辅助其他的track的
+HMEC_vs_HCC70_out = compartment_score(list(HMEC_500kb_cool, HCC70_500kb_cool), bed = allGenes)
+HMEC_vs_BT549_out = compartment_score(list(HMEC_500kb_cool, BT549_500kb_cool), bed = allGenes)
+HMEC_vs_MB231_out = compartment_score(list(HMEC_500kb_cool, MB231_500kb_cool), bed = allGenes)
+HMEC_vs_TNBC_out = compartment_score(list(HMEC_500kb_cool, HCC70_500kb_cool,MB231_500kb_cool,BT549_500kb_cool), bed = allGenes)
+
+
+
+# Look through each chromosome包含多个图形的列表gg_list，其中每个图形都是一个染色体的可视化结果
+#可视化每条染色体上的区室分数，然后颜色是与前面的相对应
+#选择HMEC_vs_TNBC_out就是1vs3，选择其他HMEC_vs_xxxx_out就是1vs1
+#可以通过gglist[[1~24]]来一幅一幅保存图片，或者如下全部保存在一副图中保存比例横轴3000像素
+#下面是HMEC vs TNBC全部
+gg_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+  gg <- visualise(HMEC_vs_TNBC_out, chr = chrom, title = chrom) 
+  gg <- gg + theme(axis.title.y = element_blank(), legend.position = "none")
+  # readline(prompt="Press [enter] to continue")
+  gg_list <- c(gg_list, list(gg))
+}
+combined_plot1 <- wrap_plots(gg_list, ncol = 4)
+ggsave("500kb_HMEC_vs_TNBC_perchr.pdf", combined_plot1, width = 20, height = 16)
+#注意，如果使用了Rmd，则图形输出都在当前code chunk下面，所以上面如果使用wrap_plots(gg_list, ncol = 4)，则图形是在下面显示，建议一律保存成pdf格式
+
+
+#下面是HMEC vs MB231
+gg_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+  gg <- visualise(HMEC_vs_MB231_out, chr = chrom, title = chrom) 
+  gg <- gg + theme(axis.title.y = element_blank(), legend.position = "none")
+  # readline(prompt="Press [enter] to continue")
+  gg_list <- c(gg_list, list(gg))
+}
+combined_plot2 <- wrap_plots(gg_list, ncol = 4)
+ggsave("500kb_HMEC_vs_MB231_perchr.pdf", combined_plot2, width = 20, height = 16)
+
+#下面是HMEC vs BT549
+gg_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+  gg <- visualise(HMEC_vs_BT549_out, chr = chrom, title = chrom) 
+  gg <- gg + theme(axis.title.y = element_blank(), legend.position = "none")
+  # readline(prompt="Press [enter] to continue")
+  gg_list <- c(gg_list, list(gg))
+}
+combined_plot3 <- wrap_plots(gg_list, ncol = 4)
+ggsave("500kb_HMEC_vs_BT549_perchr.pdf", combined_plot3, width = 20, height = 16)
+
+
+#下面是HMEC vs HCC70
+gg_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+  gg <- visualise(HMEC_vs_HCC70_out, chr = chrom, title = chrom) 
+  gg <- gg + theme(axis.title.y = element_blank(), legend.position = "none")
+  # readline(prompt="Press [enter] to continue")
+  gg_list <- c(gg_list, list(gg))
+}
+combined_plot4 <- wrap_plots(gg_list, ncol = 4)
+ggsave("500kb_HMEC_vs_HCC70_perchr.pdf", combined_plot4, width = 20, height = 16)
+```
+
+HMEC_vs_TNBC_out
+
+
+#### Saddle-analyses 
+
+Saddle分析是一种用于比较染色体亚区（compartment）之间相互作用的一种方法。以下是对Saddle分析内容的解释：
+
+Compartment与Compartment分数：
+
+Compartment指的是染色体上的亚区，这些亚区在空间上可能具有不同的结构和功能。
+Compartment分数是对每个亚区进行的一种度量，用于表示该亚区在三维染色体空间中的局部结构或功能。
+Compartment分数的分位数对比分析：
+
+Saddle分析进行了分位数对比，将Compartment分数的分位数区间进行比较。
+对每个染色体臂（chromosome arm），将Compartment分数分为多个分位数（quantile）区间。
+计算观察到的与预期的接触比：
+
+针对每一对分位数区间的组合，计算观察到的与预期的接触比。
+首先，将该分位数区间中所有基因组成对的接触数进行平均。然后，将该分位数区间中所有基因组成对的接触数与与对角线相同距离处的平均接触数相比较，得到观察到的与预期的接触比。
+观察到的与预期的接触比的计算：
+
+观察到的与预期的接触比是通过将两个亚区之间的接触数与相同距离处对角线上的接触数进行比较得到的。
+这种比值允许检测到染色体中的空间亚区之间的相互作用模式是否超过了随机期望的水平。
+总之，Saddle分析提供了对染色体亚区之间相互作用模式的定量比较，通过比较不同Compartment分数分位数区间中的观察到的与预期的接触比，可以揭示染色体结构与功能的相关性。
+
+```{r fig.height=4}
+#滤除M/Y染色体，应该是看前面区室score上这些chr太异常了
+HMEC_500kb_cool$CHRS <- HMEC_500kb_cool$CHRS[!(HMEC_500kb_cool$CHRS %in% c("chrM", "chrY"))]
+HCC70_500kb_cool$CHRS <- HCC70_500kb_cool$CHRS[!(HCC70_500kb_cool$CHRS %in% c("chrM", "chrY"))]
+BT549_500kb_cool$CHRS <- BT549_500kb_cool$CHRS[!(BT549_500kb_cool$CHRS %in% c("chrM", "chrY"))]
+MB231_500kb_cool$CHRS <- MB231_500kb_cool$CHRS[!(MB231_500kb_cool$CHRS %in% c("chrM", "chrY"))]
+
+#Compartment versus compartment scores
+#Produces a compartment score quantile versus quantile analysis in which observed over expected contacts are compared between the different quantiles of the compartment scores.
+#Per chromosome arm, compartment scores are divided in quantile bins. Subsequently, the average observed over expected score is calculated for every pairwise combination of bins. The observed over expected score is calculated as the contacts divided by the average of contacts for the same distance from the diagonal.
+#所以前面nbins=50，折中
+#Choosing a 'bins' of 5 will produce results similar to Flyamer et al. (2007), while setting 'bins' to 100 will produce results similar to Bonev et al. (2017)
+#下面分析的saddle——saddle:	A data.table containing quantile-quantile scores for 44 chromosome arms.实际上就是分析区室化分数时bin化的数据框
+
+saddle_out_HMEC_vs_HCC70 = saddle(list(HMEC_500kb_cool, HCC70_500kb_cool), 
+                   CS_discovery = HMEC_vs_HCC70_out,
+                   bins = nbins)
+saddle_out_HMEC_vs_BT549 = saddle(list(HMEC_500kb_cool, BT549_500kb_cool), 
+                                  CS_discovery = HMEC_vs_BT549_out,
+                                  bins = nbins)
+saddle_out_HMEC_vs_MB231 = saddle(list(HMEC_500kb_cool, MB231_500kb_cool), 
+                                  CS_discovery = HMEC_vs_MB231_out,
+                                  bins = nbins)
+saddle_out_HMEC_vs_TNBC = saddle(list(HMEC_500kb_cool, HCC70_500kb_cool,MB231_500kb_cool,BT549_500kb_cool), 
+                                  CS_discovery = HMEC_vs_TNBC_out,
+                                  bins = nbins)
+
+visualise(saddle_out_HMEC_vs_TNBC)  + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+ggsave("500kb_HMEC_vs_TNBC_saddle.pdf", width = 7, height = 7)
+visualise(saddle_out_HMEC_vs_HCC70)  + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+ggsave("500kb_HMEC_vs_HCC70_saddle.pdf", width = 7, height = 7)
+visualise(saddle_out_HMEC_vs_BT549)  + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+ggsave("500kb_HMEC_vs_BT549_saddle.pdf", width = 7, height = 7)
+visualise(saddle_out_HMEC_vs_MB231)  + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+ggsave("500kb_HMEC_vs_MB231_saddle.pdf", width = 7, height = 7)
+
+#大图建议是20+16，小图建议是7+7
+
+```
+
+```{r fig.height=3}
+# # Look through each chromosome对每一条染色体都进行saddle分析，注意是使用上面的saddle_out的分析结果
+# for (chrom in c(1:22, "X", "Y")) {
+#   p <- visualise(saddle_out, chr = chrom, title = chrom) + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+#   print(p)
+#   # readline(prompt="Press [enter] to continue")
+# }
+p_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+p <- visualise(saddle_out_HMEC_vs_TNBC, chr = chrom, title = chrom) + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+p <- p+theme(axis.title.y = element_blank(), legend.position = "none")
+p_list <- c(p_list,list(p))
+   # print(p)
+   # readline(prompt="Press [enter] to continue")
+ }
+wrap_plots(p_list, ncol = 4)
+ggsave("500kb_HMEC_vs_TNBC_saddle_perchr.pdf", width = 20, height = 16)
+#只对HMEC vs TNBC,其余组合就不比对了
+```
+
+
+#### Compartment-strength
+saddle disoveries
+can be used to compute compartment strengths.
+对saddle结果的定量化，可以用于分析区室强度
+
+```{r}
+CSS
+```
+```{r saddleStrength500, fig.height = 4, fig.width = 4}
+CSS <- quantify(saddle_out_HMEC_vs_TNBC) #468行/12(4rep，3类区室)=39，所以只有39个区域记入，理论23对24类chrx2=46条区域，但是排除了Y应该是44，前面也没有对chr进行什么数据处理，应该是算法内部滤除了某些区域chr
+CSS_BT549<- quantify(saddle_out_HMEC_vs_BT549) 
+CSS_HCC70 <- quantify(saddle_out_HMEC_vs_HCC70)
+CSS_MB231 <- quantify(saddle_out_HMEC_vs_MB231)
+
+# Exclude short arms where calculations produce outliers排除计算中产生异常值的短臂（short arms）,利用小提琴图直接可视化区室强度，然后查找区室化强度差异大的离散数据，离散区域
+# Check for outliers
+# ggplot(CSS, aes(x = exp, y = strength)) +
+#   geom_boxplot() +
+#   geom_label_repel(aes(label = chr))
+# Manually exclude them
+# CSS <- CSS[!(CSS$chr %in% c("21p", "22p")), ]
+
+write.csv(CSS,"TNBC_saddle_CSS_500kb.csv")
+CSS_strength_unique <- unique(CSS[,-c(3,4)]) #156行，就是strength去除重复之后的数据
+compared <- tidyr::spread(unique(CSS[,-c(3,4)]), key = 'exp', value = 'strength')
+
+#实际上这里的数据也就将前面中的CSS的数据中提取出来了两列，主要是其中的sample+strength列，但是还有cc以及score的信息还没有提取
+# Compare compartmentalization strength
+print(paste("Mean compartment strength in HMEC:", mean(compared$HMEC))) #3.4102007935837
+print(paste("Mean compartment strength in BT549:", mean(compared$BT549))) #1.65687130721445
+print(paste("Mean compartment strength in HCC70:", mean(compared$HCC70))) #3.25543165659022
+print(paste("Mean compartment strength in MB231:", mean(compared$MB231))) #3.10574258430639
+#这里最好是分开来分析不同类型细胞系的区室，不要3个直接合并之后取mean，因为有的区室强度是比HMEC大，有的是小
+#分情况而言，实际是不一致的，所以不能够直接合并对应的TNBC的数据并取mean
+#即不建议print(paste("Mean compartment strength in TNBC:", mean(c(compared$HCC70,compared$MB231,compared$BT549))))
+print(paste("T-test for HMEC vs BT549:", t.test(compared$HMEC, compared$BT549)$p.value %>% formatC(., format = "e", digits = 5))) #4.75127e-04
+print(paste("T-test for HMEC vs HCC70:", t.test(compared$HMEC, compared$HCC70)$p.value %>% formatC(., format = "e", digits = 5))) #7.92099e-01
+print(paste("T-test for HMEC vs MB231:", t.test(compared$HMEC, compared$MB231)$p.value %>% formatC(., format = "e", digits = 5))) #5.31807e-01
+#从这里可以看出其实BT549区室差异最大，所以挑选这个分析表征，当然可能是异质性区别太大了，如果是探究共性的话其实是可以直接从其他2个细胞系中获取推论
+
+#下面的小提琴+箱线图展示，实际上就是前面的异常区域排除的前置步骤-可视化，只不过多加了显著检验
+#对于下面图片的处理：1vs3 CSS展示图片为核心（但是设置字幕为false，即不显示计算公式），因为此处比较的算法+p值域前面t检验两两之间差异较大，想必不应该采用
+#其他3个1vs1 CSS对象中字幕设置为true，因为检验p值在公式字幕上，但没有1vs3的bar显示，但是p值与上面t值相接近
+#所以1vs3 CSS图片为核心，将3个1vs1的p值修改到该图片中；同时保存后面3张图片
+ggbetweenstats(data=CSS,
+                x=exp,
+                y=strength,
+               results.subtitle = FALSE,
+               pairwise.display="all",
+                title = "Distribution of compartment strength across HMEC vs TNBC")
+ggsave("500kb_HMEC_vs_TNBC_compartment_strength_Distribution.pdf", width = 7, height = 7)
+
+ggbetweenstats(data=CSS_strength_unique,
+                x=exp,
+                y=strength,
+               results.subtitle = FALSE,
+               pairwise.display="all",
+                title = "Distribution of compartment strength across HMEC vs TNBC")
+ggsave("500kb_HMEC_vs_TNBC_compartment_strength_Distribution_unique.pdf", width = 7, height = 7)
+
+
+ggbetweenstats(data=CSS_BT549,
+               x=exp,
+               y=strength,
+               pairwise.display="all",
+               title = "Distribution of compartment  strength across HMEC vs BT549")
+ggsave("500kb_HMEC_vs_BT549_compartment_strength_Distribution.pdf", width = 7, height = 7)
+ggbetweenstats(data=CSS_HCC70,
+               x=exp,
+               y=strength,
+               pairwise.display="all",
+               title = "Distribution of compartment  strength across HMEC vs HCC70")
+ggsave("500kb_HMEC_vs_HCC70_compartment_strength_Distribution.pdf", width = 7, height = 7)
+ggbetweenstats(data=CSS_MB231,
+               x=exp,
+               y=strength,
+               #results.subtitle = FALSE,
+               pairwise.display="none",
+               title = "Distribution of compartment  strength across HMEC vs MB231")
+ggsave("500kb_HMEC_vs_MB231_compartment_strength_Distribution.pdf", width = 7, height = 7)
+
+#可以依据https://zhuanlan.zhihu.com/p/456212826绘制3 vs 1的检验信息统计图
+# Plot compartment strength differences,设置max_overlap显示全部chr（compared显示为39，我设置为48）
+ggplot(compared, aes(x = HMEC, y = BT549)) +
+  geom_segment(aes(x = 0, xend = 5, y = 0, yend = 5, colour = "grey")) + scale_colour_identity() +
+  geom_point(col = "red") +
+  geom_label_repel(aes(label = chr), force=1, box.padding=0.5, label.padding = 0.1, segment.color = 'grey50', max.overlaps = 48) +
+  theme_bw() + xlim(0, 5) + ylim(0, 5) +
+  labs(title = "Compartment strength comparison between HMEC vs BT549")
+ggsave("500kb_HMEC_vs_BT549_compartment_strength_comparison05.pdf", width = 7, height = 7)
+ggplot(compared, aes(x = HMEC, y = HCC70)) +
+  geom_segment(aes(x = 0, xend = 5, y = 0, yend = 5, colour = "grey")) + scale_colour_identity() +
+  geom_point(col = "red") +
+  geom_label_repel(aes(label = chr), force=1, box.padding=0.5, label.padding = 0.1, segment.color = 'grey50', max.overlaps = 48) +
+  theme_bw() + xlim(0, 5) + ylim(0, 5) +
+  labs(title = "Compartment strength comparison between HMEC vs HCC70")
+ggsave("500kb_HMEC_vs_HCC70_compartment_strength_comparison05.pdf", width = 7, height = 7)
+ggplot(compared, aes(x = HMEC, y = MB231)) +
+  geom_segment(aes(x = 0, xend = 5, y = 0, yend = 5, colour = "grey")) + scale_colour_identity() +
+  geom_point(col = "red") +
+  geom_label_repel(aes(label = chr), force=1, box.padding=0.5, label.padding = 0.1, segment.color = 'grey50', max.overlaps = 48) +
+  theme_bw() + xlim(0, 5) + ylim(0, 5) +
+  labs(title = "Compartment strength comparison between HMEC vs MB231")
+ggsave("500kb_HMEC_vs_MB231_compartment_strength_comparison05.pdf", width = 7, height = 7)
+```
+
+#这一块代码是插叙，可以跳过
+```{r}
+#还有score没有进行可视化
+#strength要排除异常值，score也要,异常值是要排除单个record，还是drop整个chr区域,用css还是unique没有太大区别
+CSS_strength_unique <- unique(CSS[,-c(3,4)]) #156行，就是strength去除重复之后的数据
+#CSS_strength_unique <- CSS[!duplicated(CSS$strength), ]
+ggplot(CSS_strength_unique, aes(x = exp, y = strength)) +
+   geom_boxplot() +
+   geom_label_repel(aes(label = chr))
+CSS_strength_unique %>%
+  dplyr::filter(exp %in% c("HMEC", "BT549", "HCC70","MB231")) %>% summary()
+#"HMEC", "BT549", "HCC70","MB231"
+CSS_strength_unique[CSS_strength_unique$strength>10,]
+CSS_strength_modi <- CSS_strength_unique[!(CSS_strength_unique$chr %in% c("chr8p", "chrYq")), ]
+
+
+#ggplot(CSS, aes(x = exp, y = score)) +
+#   geom_boxplot() +
+#   geom_label_repel(aes(label = chr))
+#CSS_score_modi1 <- CSS[!(CSS$chr %in% c("chr8p", "chrYq")), ]
+#ggplot(CSS_score_modi1, aes(x = exp, y = score)) +
+#   geom_boxplot() +
+#   geom_label_repel(aes(label = chr))
+
+
+
+
+
+CSS %>%
+  dplyr::filter(CC %in% c("AA", "BB", "AB")) %>% summary()
+hist(CSS$score)
+CSS[CSS$score>20,]
+#人工排除异常值
+CSS_modi <- CSS[!(CSS$chr %in% c("chr8p", "chrYq","chr9p","chr16q")), ]
+
+
+#还是不人工排除，直接使用log2算了，实际上按照saddle中quantify中的说法，这里的score实际上是OEscore的2的指数化，所以log2之后反而是OEscore
+CSS %>%
+  dplyr::filter(CC %in% c("AA", "BB", "AB")) %>% 
+  mutate(log2score = log2((score))) %>%
+  grouped_ggbetweenstats(
+                #data=CSS,
+                x=exp,
+               y=log2score, #这里如果使用原始的数据会非常大
+               grouping.var = CC,
+               results.subtitle = FALSE,
+               pairwise.display="all",
+    outlier.tagging = TRUE,
+    ## 用于拼图的参数
+    annotation.args = list(title = "Distribution of compartment score across HMEC vs TNBC"),
+    plotgrid.args = list(nrow = 3) 
+  )
+ggsave("500kb_HMEC_vs_TNBC_compartment_score_Distribution_log2.pdf", width = 7, height = 15)
+
+CSS_log2 <- CSS%>% 
+  mutate(score = log2(score))
+CSS_OE <- dplyr::summarise(dplyr::group_by(CSS_log2,
+                                       exp,
+                                       CC),score = mean((score)))
+CSS_OE$exp <- factor(CSS_OE$exp, levels =  c("HMEC", "BT549","HCC70","MB231"))
+CSS_OE$CC  <- factor(CSS_OE$CC, levels = c("AA", "BB", "AB"))
+ggplot(CSS_OE, aes(x = exp, y = score, fill = exp)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = mycols[1:4]) +
+  theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+  facet_wrap(.~CC, scales = "free")
+ggsave("500kb_HMEC_vs_TNBC_contact_enrichment_OE.pdf", width = 10, height = 7)
+
+
+
+#下面是strength的更正列
+tmp = dplyr::summarise(dplyr::group_by(CSS, chr,
+                                       exp,
+                                       CC),score=mean(score))
+df.tmp <- as.data.frame(tmp)
+df.tmp <- reshape2::dcast(df.tmp, exp + chr ~ CC)
+df.tmp$compscore <- log((df.tmp$AA*df.tmp$BB)/(df.tmp$AB^2))
+df.tmp$exp <- factor(df.tmp$exp, levels=c("HMEC", "BT549","HCC70","MB231"))
+df.hd <- dplyr::summarise(dplyr::group_by(df.tmp[is.finite(df.tmp$compscore),], exp), score = mean(compscore))
+df.hd$exp <- factor(df.hd$exp, levels = c("HMEC", "BT549","HCC70","MB231"))
+ggplot(df.hd, aes(x = exp, y = score, fill = exp)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = mycols[1:4]) +
+  theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10),plot.title = element_text(hjust = 0.5))+
+  labs(y="log(A-A*B-B/A-B^2)",title = "Compartmentalization Score") 
+ggsave("500kb_HMEC_vs_TNBC_Compartmentalization_score_OE.pdf", width = 7, height = 7)
+ 
+```
+
+
+#### Du_et_al_R_processing 借用了其他人的脚本
+https://github.com/qianxidu/Replication_Timing_Du_et_al_2021
+使用 GENOVA v.1.0.0 R 包对 100 kb 分辨率的数据进行了迭代校正。
+使用第一个特征向量（PC1）的值对 100 kb 的区间进行了分组，将其分为 50 个百分位组。
+AB 区室分析：
+在 50 个百分位组的两两组合中，计算了区间之间的平均接触丰度（obs/exp）。
+将接触丰度的 log2 值绘制为热图，形成了 saddle plot（马鞍图）。
+区室强度摘要：
+计算了 A-A 和 B-B 区室的摘要强度，这是在 PC1 百分位的顶部（A-A）或底部（B-B）20% 之间的平均 log2 接触丰度。
+对于 A-B 区室强度，则是在 PC1 百分位的顶部和底部 20% 之间的平均 log2 接触丰度。
+
+
+
+##### Saddle plot, genome-wide 
+这里绘制的也是saddle，注意与前面的进行比对；
+前面的效果是类似于APA，ATA之类，有1vs1的效果，下面的saddle更像是原文中的saddle图（仅仅只是EV值的分解展示，没有1vs1的效果）
+！！！！！！！！！！！！！！！！！！！！！！！！！！！！二者取其一
+先处理HMEC vs BT549，再处理HMEC vs TNBC，看效果择一最终展示
+```{r fig.height=3}
+#--- Figure 4A - saddle plot ----
+# saddle_out from GENOVA
+# head(saddle_out_HMEC_vs_TNBC$saddle) 具体研究的从下面开始就只用saddle_out_HMEC_vs_BT549，因为BT549见前面已经做出来显著性，正好saddle也能和前面区分
+#必要时候可以使用全局1vs3的saddle_out_HMEC_vs_TNBC或者是其他1vs1的3个补充
+dat <- saddle_out_HMEC_vs_BT549$saddle #saddle:	A 98864 x 5 data.table containing quantile-quantile scores for 44 chromosome arms.对应q1、q2应该就是nbin中对区室进行分bin化
+#这个saddle数据框列名是exp chr q1 q2 mean
+dat2 <- dat[which(dat$mean > 0),]  #过滤了 dat 数据中 mean 列大于 0 的行
+   
+tmp = setNames(aggregate(log2(dat2$mean), by = list(dat2$q1, dat2$q2, dat2$exp), mean, na.rm = T), c("x",'y','z', "score"))
+#使用 aggregate() 函数对 dat2 数据框中的 mean 列进行聚合操作。具体来说，它按照 q1、q2 和 exp 列的组合进行分组，然后计算每个分组的 mean 列的平均值。参数 na.rm = TRUE 表示在计算平均值时忽略 NA 值，然后将结果重新命名为 x、y、z 和 score.
+#即exp q1 q2 mean重命名为 z、 x、y和 score，注意顺序
+
+#将 tmp 数据中 score 列中小于 -1 和大于 1 的值设置为 -1 和 1，以确保 score 值范围在 -1 到 1 之间，相当于是归一化
+tmp$score[which(tmp$score < -1)] <- -1
+tmp$score[which(tmp$score > 1)] <- 1
+
+comp <- tmp[tmp$x != tmp$y,]  #新的数据框 comp，其中包含 tmp 数据框中 x 列和 y 列不相等的行，即原先q1和q2不相等（应该就是chr bin分区不相等区域）
+colnames(comp) <- c("y", "x", "z", "score")
+comp <- comp[,c("x", "y", "z", "score")]
+#重新排列了 comp 数据框的列的顺序，将 x、y、z 和 score 列调整为指定的顺序——其实可以看得出来xy在新数据框中的顺序是颠倒了，正反一合并，相当于是1 2 value+2 1 value交互的都有了，所以前面对于xy一样的行没有提取出来，应该就是想直接在正向顺序中就展示所有互作的nbin（然后不用去从两列中推导）
+
+df <- rbind(tmp, comp) #就是正反一合并，没有影响，就是正反数据框的合并
+df$z <- factor(df$z, levels=c("HMEC", "BT549")) #将 df 数据框中的 z 列转换为因子变量，并指定因子水平为 "HMEC" 和 "BT549"，其实z就是前面saddle中的exp实验对象
+
+gg <- ggplot(df, aes(x, y, fill = score)) + geom_tile() + scale_x_reverse() +
+  scale_fill_gradientn(colours=rev(c("#B2182B", "white", "#2166AC")), limits=c(-1, 1)) + theme_minimal() + 
+  theme(panel.grid = element_blank()) + ggtitle("saddle") +
+  coord_fixed() + labs(x="bin1", y="bin2") + facet_wrap(~z) # axis.text.x = element_text(angle=90, vjust = 1, hjust = 1), 
+#按照文献中的展示，此处使用的其实是x=y="1st eigenvector"
+gg
+ggsave("500kb_HMEC_vs_BT549_saddle_enrichment_laterbin.pdf", width = 7, height = 7)
+gg <- ggplot(df, aes(x, y, fill = score)) + geom_tile() + scale_x_reverse() +
+  scale_fill_gradientn(colours=rev(c("#B2182B", "white", "#2166AC")), limits=c(-1, 1)) + theme_minimal() + 
+  theme(panel.grid = element_blank()) + ggtitle("saddle") +
+  coord_fixed() + labs(x="1st eigenvector", y="1st eigenvector") + facet_wrap(~z)
+gg
+ggsave("500kb_HMEC_vs_BT549_saddle_enrichment_laterev.pdf", width = 7, height = 7)
+#ggsave("../manuscript/figures/Figure_saddle_500kb_Du.svg", width = 7, height = 3.5)
+
+
+#下面是对HMEC vs TNBC全体1vs3,同上
+dat <- saddle_out_HMEC_vs_TNBC$saddle 
+#下面是处理原始50vs50的OE值
+ggbetweenstats(data=dat,
+                x=exp,
+               y=mean,
+               results.subtitle = FALSE,
+               pairwise.display="all",
+               title = "Distribution of OE score across HMEC vs TNBC")
+ggsave("500kb_HMEC_vs_TNBC_OE_score_Distribution.pdf", width = 7, height = 7)
+   
+
+dat2 <- dat[which(dat$mean > 0),]  
+tmp = setNames(aggregate(log2(dat2$mean), by = list(dat2$q1, dat2$q2, dat2$exp), mean, na.rm = T), c("x",'y','z', "score"))
+tmp$score[which(tmp$score < -1)] <- -1
+tmp$score[which(tmp$score > 1)] <- 1
+comp <- tmp[tmp$x != tmp$y,]   
+colnames(comp) <- c("y", "x", "z", "score")
+comp <- comp[,c("x", "y", "z", "score")]
+df <- rbind(tmp, comp) 
+df$z <- factor(df$z, levels=c("HMEC", "BT549","HCC70","MB231")) 
+gg <- ggplot(df, aes(x, y, fill = score)) + geom_tile() + scale_x_reverse() +
+  scale_fill_gradientn(colours=rev(c("#B2182B", "white", "#2166AC")), limits=c(-1, 1)) + theme_minimal() + 
+  theme(panel.grid = element_blank()) + ggtitle("saddle") +
+  coord_fixed() + labs(x="1st eigenvector", y="1st eigenvector") + facet_wrap(~z)
+gg
+ggsave("500kb_HMEC_vs_TNBC_saddle_enrichment_laterev.pdf", width = 7, height = 7)
+```
+
+##### Contact enrichment, genome-wide   全基因组角度
+先处理HMEC vs BT549，再处理HMEC vs TNBC，看效果择一最终展示
+
+```{r fig.height=2, fig.width=4}
+#--- Figure 4B ----
+# saddle_out from GENOVA
+# script from GENOVA compartment strength function     
+dat = saddle_out_HMEC_vs_BT549$saddle 
+dat <- dat[!is.na(dat$q1),] #去除NA
+
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))  #提取实验对象名字HMEC等
+dat$CC <- 'XX'  #建一个名为 CC 的新列，并将其填充为 'XX' 
+MAXbin = max(dat$q1)  #就是nbin分bin定量化,50
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+#即 MAXbin 的20%向下取整。如果结果小于1，则将其设置为1
+#binsTOse 变量用于定义一个阈值，用来划分 q1 列的值。具体来说，对于 dat 数据框中的每一行，如果 q1 列的值小于等于 binsTOse，那么该行对应的 CC 列的值会被设置为 "BB"。这样就将数据分成了四个类别："BB"、"AB"、"BA" 和 "AA"
+#！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！这里选取的阈值binsTOse不清楚&下面依据阈值计算AB等为什么是这么算？
+
+
+#注意下面的bin划分的AB实际上是对于exp内部的，还是saddle分析划分方法
+#！！！！！！！！！！！！！！！！！！！！！问题其实和上面一样，为什么阈值binTOse这么设置，为什么下面CC分类是这么算？以及没有AB区域是否就是这么导致的
+#解答：
+#计算了 A-A 和 B-B 区室的摘要强度，这是在 PC1 百分位的顶部（A-A）或底部（B-B）20% 之间的平均 log2 接触丰度，也就是说AA,BB区室强度是选取top 20%或者bottom 20%的pc1百分位计算的contact（这里其实应该意识到按照pc1百分位分组的话前面肯定是A，后面肯定是B;只不过选取的是前面的A以及后面的B），所以是抽出了top的A以及bottom的B，分析互作score如何，比如说top的AA互作在BT549中比HMEC弱等等
+#对于 A-B 区室强度，则是在 PC1 百分位的顶部和底部 20% 之间的平均 log2 接触丰度
+#！！！！！！！！！！！！！！！！！！！！！所以现在的问题是如何解释结果
+
+#根据条件将 dat 数据框中的 CC 列进行设置
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+    
+#> "AB" %in% dat$CC
+#[1] FALSE
+#这里要搞清楚做的是什么，再看看如何分析AB
+#> unique(dat$CC)
+#[1] "BB" "XX" "BA" "AA" 
+#确实从数据上看，没有AB的区域   
+
+dat = dat[dat$CC != 'XX',] #从 dat 数据框中删除 CC 列值为 'XX' 的行
+dat2 <- dat[which(dat$mean > 0),] #从 dat 中选取 mean 列大于0的行，并将结果存储在 dat2 中
+
+#将数据框 dat2 按照 exp 和 CC 两列进行分组，这意味着后续的操作将针对每个不同的 exp（可能是 "PR" 或 "CR"）和 CC（可能是 "AA"、"BB"、"AB" 或 "BA"）组合进行计算。使用 summarise() 函数计算每个组合的平均 log2 接触丰度（mean 列的平均值），具体来说，它首先计算了 每一行mean 列的 log2 值，然后对分组内的这些 log2 值进行平均计算。最终结果将存储在一个名为 score 的新列中，所以是先log2再mean即平均 log2 接触丰度
+cescores = dplyr::summarise(dplyr::group_by(dat2,
+                                       exp,
+                                       CC),score = mean(log2(mean)))
+
+
+## values of cescores are plotted in ，将 cescores 数据框中的 exp 和 CC 列转换为因子变量，并指定因子水平
+cescores$exp <- factor(cescores$exp, levels =  c("HMEC", "BT549"))
+cescores$CC  <- factor(cescores$CC, levels = c("AA", "BB", "BA"))
+ggplot(cescores, aes(x = exp, y = score, fill = exp)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = mycols[1:2]) +
+  theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+  facet_wrap(.~CC, scales = "free")
+ggsave("500kb_HMEC_vs_BT549_contact_enrichment.pdf", width = 10, height = 7)
+
+
+
+#下面是HMEC vs TNBC，即1vs3的，同上
+dat = saddle_out_HMEC_vs_TNBC$saddle
+dat <- dat[!is.na(dat$q1),] 
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))  
+dat$CC <- 'XX'  
+MAXbin = max(dat$q1)  
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+
+#> "AB" %in% dat$CC
+#[1] FALSE
+#这里要搞清楚做的是什么，再看看如何分析AB
+#> unique(dat$CC)
+#[1] "BB" "XX" "BA" "AA"
+#确实从数据上看，没有AB的区域
+
+dat = dat[dat$CC != 'XX',] 
+
+dat2 <- dat[which(dat$mean > 0),] 
+
+cescores = dplyr::summarise(dplyr::group_by(dat2,
+                                       exp,
+                                       CC),score = mean(log2(mean)))
+
+cescores$exp <- factor(cescores$exp, levels =  c("HMEC", "BT549","HCC70","MB231"))
+cescores$CC  <- factor(cescores$CC, levels = c("AA", "BB", "BA"))
+ggplot(cescores, aes(x = exp, y = score, fill = exp)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = mycols[1:4]) +
+  theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+  facet_wrap(.~CC, scales = "free")
+ggsave("500kb_HMEC_vs_TNBC_contact_enrichment.pdf", width = 10, height = 7)
+
+#mycols[1:2] 是一个包含两种颜色的向量，这两种颜色用于表示不同的实验（exp 列）,此处修改为4
+
+```
+
+##### Contact enrichment, per chromosome 单染色体
+先处理HMEC vs BT549，再处理HMEC vs TNBC，看效果择一最终展示
+
+```{r fig.height=20}
+#循环for内部的代码处理实际上和前面全局处理一致
+dat = saddle_out_HMEC_vs_BT549$saddle
+dat <- dat[!is.na(dat$q1),]
+# Sort chromosome arms in logical order获取数据中唯一的染色体信息，并按逻辑顺序排序
+chromosomes <- unique(dat$chr) %>% gtools::mixedsort()
+gg_list <- list()
+for (chrom in chromosomes) {
+  dat_selected <- dat %>% filter(chr == chrom)
+
+  namesVector <- c()
+  namesVector <- c(namesVector, unique(dat_selected$exp))
+  dat_selected$CC <- 'XX'
+  MAXbin = max(dat_selected$q1)
+  binsTOse = floor(MAXbin * .2)
+  binsTOse = max(1, binsTOse)
+  dat_selected[dat_selected$q1 <= binsTOse & dat_selected$q2 <= binsTOse,"CC"] = "BB"
+  dat_selected[dat_selected$q2 <= binsTOse & dat_selected$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+  dat_selected[dat_selected$q1 <= binsTOse & dat_selected$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+  dat_selected[dat_selected$q1 >= MAXbin-binsTOse+1 & dat_selected$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+  dat_selected = dat_selected[dat_selected$CC != 'XX',]
+  dat_selected2 <- dat_selected[which(dat_selected$mean > 0),]
+  cescores_selected = dplyr::summarise(dplyr::group_by(dat_selected2,
+                                              exp,
+                                              CC),score = mean(log2(mean)))
+  ## values of cescores_selected are plotted in 
+  cescores_selected$exp <- factor(cescores_selected$exp, levels = c("HMEC", "BT549"))
+  cescores_selected$CC  <- factor(cescores_selected$CC, levels = c("AA", "BB", "BA"))
+  gg <- ggplot(cescores_selected, aes(x = CC, y = score, fill = exp)) +
+    geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.9)) +
+    scale_fill_manual(values = mycols[1:2]) +
+    theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+    ggtitle(chrom)
+  gg_list <- c(gg_list, list(gg))
+}
+p_combined<-wrap_plots(gg_list, ncol = 4)
+ggsave("500kb_HMEC_vs_BT549_contact_enrichment_perchr.pdf", p_combined,width = 20, height = 16)
+
+
+
+#下面是HMEC vs TNBC,同上
+dat = saddle_out_HMEC_vs_TNBC$saddle
+dat <- dat[!is.na(dat$q1),]
+chromosomes <- unique(dat$chr) %>% gtools::mixedsort()
+gg_list <- list()
+for (chrom in chromosomes) {
+  dat_selected <- dat %>% filter(chr == chrom)
+
+  namesVector <- c()
+  namesVector <- c(namesVector, unique(dat_selected$exp))
+  dat_selected$CC <- 'XX'
+  MAXbin = max(dat_selected$q1)
+  binsTOse = floor(MAXbin * .2)
+  binsTOse = max(1, binsTOse)
+  dat_selected[dat_selected$q1 <= binsTOse & dat_selected$q2 <= binsTOse,"CC"] = "BB"
+  dat_selected[dat_selected$q2 <= binsTOse & dat_selected$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+  dat_selected[dat_selected$q1 <= binsTOse & dat_selected$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+  dat_selected[dat_selected$q1 >= MAXbin-binsTOse+1 & dat_selected$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+  dat_selected = dat_selected[dat_selected$CC != 'XX',]
+  dat_selected2 <- dat_selected[which(dat_selected$mean > 0),]
+  cescores_selected = dplyr::summarise(dplyr::group_by(dat_selected2,
+                                              exp,
+                                              CC),score = mean(log2(mean)))
+  ## values of cescores_selected are plotted in 
+  cescores_selected$exp <- factor(cescores_selected$exp, levels = c("HMEC", "BT549","HCC70","MB231"))
+  cescores_selected$CC  <- factor(cescores_selected$CC, levels = c("AA", "BB", "BA"))
+  gg <- ggplot(cescores_selected, aes(x = CC, y = score, fill = exp)) +
+    geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.9)) +
+    scale_fill_manual(values = mycols[1:4]) +
+    theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+    ggtitle(chrom)
+  gg_list <- c(gg_list, list(gg))
+}
+p_combined<-wrap_plots(gg_list, ncol = 4)
+ggsave("500kb_HMEC_vs_TNBC_contact_enrichment_perchr.pdf", p_combined,width = 20, height = 16)
+
+```
+
+##### Compartmentalization score, genome-wide 
+
+taking the ratio between (AA+BB) / (AB+BA). This corresponds visually to the ratio between the upper left and lower right corners, versus the lower left and upper right corners in the plot above.
+区室分数的计算公式是通过计算 (AA + BB) 与 (AB + BA) 的比值来表示。这一比值代表了热图中左上角（AA + BB）与右下角（AB + BA）之间的比值，与左下角（AB + BA）与右上角（AA + BB）之间的比值相对应
+先处理HMEC vs BT549，再处理HMEC vs TNBC，看效果择一最终展示
+也就说是下面所使用的也是top 20%的区室
+```{r fig.height=2, fig.width=3}
+#--- Figure 4C ----
+#下面处理的是dat2，与前一部分处理的dat不同，为避免混淆，查看源代码，还是从saddle分析上游重建dat2数据对象
+dat = saddle_out_HMEC_vs_BT549$saddle
+dat <- dat[!is.na(dat$q1),]
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))
+dat$CC <- 'XX'
+MAXbin = max(dat$q1)
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+dat = dat[dat$CC != 'XX',]
+dat2 <- dat[which(dat$mean > 0),]
+#重建dat2对象完毕
+
+
+##对dat2数据框按照chr、exp和CC列进行分组，并计算每组的mean列的均值，并将结果赋值给tmp
+tmp = dplyr::summarise(dplyr::group_by(dat2, chr,
+                                       exp,
+                                       CC),score = mean(mean))
+df.tmp <- as.data.frame(tmp)
+df.tmp <- reshape2::dcast(df.tmp, exp + chr ~ CC)
+#reshape2包中的dcast函数用于将长格式的数据框转换为宽格式的数据框。在这里，df.tmp数据框中的数据是长格式的，即每个观测值占据一行，而exp和chr列是标识变量，而CC列是数值变量。通过dcast函数，我们将exp和chr列作为标识变量，CC列作为新的列名，mean列的值填充到相应的位置，从而得到了一个新的宽格式的数据框
+#使用 reshape2 包中的 dcast() 函数将数据重新排列，使每个染色体和实验都有对应的 A-A、B-B、BA 和 AB 的评分
+#从结果上来看是将AA,BA,AB等转换成了新的一列
+df.tmp$compscore <- log((df.tmp$AA*df.tmp$BB)/(df.tmp$BA^2))
+#计算区室化评分，其公式为 log((AA * BB) / (BA^2))
+#这里的计算公式为什么是这样的!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#taking the ratio between (AA+BB) / (AB+BA). This corresponds visually to the ratio between the upper left and lower right corners, versus the lower left and upper right corners in the plot above.
+
+df.tmp$exp <- factor(df.tmp$exp, levels=c("HMEC", "BT549"))
+#对区室化评分进行汇总，计算每个实验的平均值，并将结果存储在名为 df.hd 的数据框中
+df.hd <- dplyr::summarise(dplyr::group_by(df.tmp[is.finite(df.tmp$compscore),], exp), score = mean(compscore))
+## values of df.hd are plotted in 4B
+df.hd$exp <- factor(df.hd$exp, levels = c("HMEC", "BT549"))
+ggplot(df.hd, aes(x = exp, y = score, fill = exp)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = mycols[1:2]) +
+  theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10),plot.title = element_text(hjust = 0.5))+
+  labs(y="log(A-A*B-B/A-B^2)",title = "Compartmentalization Score") 
+ggsave("500kb_HMEC_vs_BT549_Compartmentalization_score.pdf", width = 7, height = 7)
+
+
+
+#下面是HMEC vs TNBC，同上
+dat = saddle_out_HMEC_vs_TNBC$saddle
+dat <- dat[!is.na(dat$q1),]
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))
+dat$CC <- 'XX'
+MAXbin = max(dat$q1)
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+dat = dat[dat$CC != 'XX',]
+dat2 <- dat[which(dat$mean > 0),]
+
+tmp = dplyr::summarise(dplyr::group_by(dat2, chr,
+                                       exp,
+                                       CC),score = mean(mean))
+df.tmp <- as.data.frame(tmp)
+df.tmp <- reshape2::dcast(df.tmp, exp + chr ~ CC)
+df.tmp$compscore <- log((df.tmp$AA*df.tmp$BB)/(df.tmp$BA^2))
+df.tmp$exp <- factor(df.tmp$exp, levels=c("HMEC", "BT549","HCC70","MB231"))
+df.hd <- dplyr::summarise(dplyr::group_by(df.tmp[is.finite(df.tmp$compscore),], exp), score = mean(compscore))
+df.hd$exp <- factor(df.hd$exp, levels = c("HMEC", "BT549","HCC70","MB231"))
+ggplot(df.hd, aes(x = exp, y = score, fill = exp)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = mycols[1:4]) +
+  theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10),plot.title = element_text(hjust = 0.5))+
+  labs(y="log(A-A*B-B/A-B^2)",title = "Compartmentalization Score") 
+ggsave("500kb_HMEC_vs_TNBC_Compartmentalization_score.pdf", width = 7, height = 7)
+```
+
+##### Compartmentalization score, chromosome-specific 单染色体角度
+先处理HMEC vs BT549，再处理HMEC vs TNBC，看效果择一最终展示
+
+```{r fig.height=20}
+#--- Figure 4C ----
+#下面处理的是dat2，同前，为避免混淆，查看源代码，还是从saddle分析上游重建dat2数据对象
+dat = saddle_out_HMEC_vs_BT549$saddle
+dat <- dat[!is.na(dat$q1),]
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))
+dat$CC <- 'XX'
+MAXbin = max(dat$q1)
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+dat = dat[dat$CC != 'XX',]
+dat2 <- dat[which(dat$mean > 0),]
+#重建dat2对象完毕
+
+#和上面一样，循环for内部就是取出染色体子集做分析
+tmp = dplyr::summarise(dplyr::group_by(dat2, chr,
+                                       exp,
+                                       CC),score = mean(mean))
+df.tmp <- as.data.frame(tmp)
+# Sort chromosome arms in logical order
+chromosomes <- unique(dat$chr) %>% gtools::mixedsort()
+gg_list <- list()
+for (chrom in chromosomes) {
+  df.tmp_selected <- df.tmp %>% filter(chr == chrom)
+  df.tmp_selected <- reshape2::dcast(df.tmp_selected, exp + chr ~ CC)
+  df.tmp_selected$compscore <- log((df.tmp_selected$AA*df.tmp_selected$BB)/(df.tmp_selected$BA^2))
+  
+  df.tmp_selected$exp <- factor(df.tmp_selected$exp, levels=c("HMEC", "BT549"))
+  
+  df.hd_selected <- dplyr::summarise(dplyr::group_by(df.tmp_selected[is.finite(df.tmp_selected$compscore),], exp), score = mean(compscore))
+  df.hd_selected$exp <- factor(df.hd_selected$exp, levels = c("HMEC", "BT549"))
+  gg <- ggplot(df.hd_selected, aes(x = exp, y = score, fill = exp)) +
+    geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+    scale_fill_manual(values = mycols[1:2]) +
+    theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+    ggtitle(chrom)
+  gg_list <- c(gg_list, list(gg))
+}
+p_combined<-wrap_plots(gg_list, ncol = 4)
+ggsave("500kb_HMEC_vs_BT549_Compartmentalization_score_perchr.pdf", p_combined,width = 20, height = 16)
+
+
+
+#下面是HMEC vs TNBC，同上
+dat = saddle_out_HMEC_vs_TNBC$saddle
+dat <- dat[!is.na(dat$q1),]
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))
+dat$CC <- 'XX'
+MAXbin = max(dat$q1)
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+dat = dat[dat$CC != 'XX',]
+dat2 <- dat[which(dat$mean > 0),]
+
+tmp = dplyr::summarise(dplyr::group_by(dat2, chr,
+                                       exp,
+                                       CC),score = mean(mean))
+df.tmp <- as.data.frame(tmp)
+chromosomes <- unique(dat$chr) %>% gtools::mixedsort()
+gg_list <- list()
+for (chrom in chromosomes) {
+  df.tmp_selected <- df.tmp %>% filter(chr == chrom)
+  df.tmp_selected <- reshape2::dcast(df.tmp_selected, exp + chr ~ CC)
+  df.tmp_selected$compscore <- log((df.tmp_selected$AA*df.tmp_selected$BB)/(df.tmp_selected$BA^2))
+  
+  df.tmp_selected$exp <- factor(df.tmp_selected$exp, levels=c("HMEC", "BT549","HCC70","MB231"))
+  
+  df.hd_selected <- dplyr::summarise(dplyr::group_by(df.tmp_selected[is.finite(df.tmp_selected$compscore),], exp), score = mean(compscore))
+  df.hd_selected$exp <- factor(df.hd_selected$exp, levels = c("HMEC", "BT549","HCC70","MB231"))
+  gg <- ggplot(df.hd_selected, aes(x = exp, y = score, fill = exp)) +
+    geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+    scale_fill_manual(values = mycols[1:4]) +
+    theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+    ggtitle(chrom)
+  gg_list <- c(gg_list, list(gg))
+}
+p_combined<-wrap_plots(gg_list, ncol = 4)
+ggsave("500kb_HMEC_vs_TNBC_Compartmentalization_score_perchr.pdf", p_combined,width = 20, height = 16)
+
+```
+
+
+
+
+
+
+
+
+
+
+####### 100kb resolution 这部分代码的下面是原始的100kb，但是修改起来太麻烦了，所以就直接复制上面的500kb，然后再修改res
+注释就全部删除，详情参考500kb分析
+
+```{r fig.height=12}
+allGenes <- exons(TxDb.Hsapiens.UCSC.hg19.knownGene)
+allGenes <- as.data.frame(allGenes)
+allGenes <- allGenes[allGenes$seqnames %in% unique(HMEC_100kb_cool$CHRS) , 1:3] 
+
+HMEC_vs_HCC70_out = compartment_score(list(HMEC_100kb_cool, HCC70_100kb_cool), bed = allGenes)
+HMEC_vs_BT549_out = compartment_score(list(HMEC_100kb_cool, BT549_100kb_cool), bed = allGenes)
+HMEC_vs_MB231_out = compartment_score(list(HMEC_100kb_cool, MB231_100kb_cool), bed = allGenes)
+HMEC_vs_TNBC_out = compartment_score(list(HMEC_100kb_cool, HCC70_100kb_cool,MB231_100kb_cool,BT549_100kb_cool), bed = allGenes)
+
+gg_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+  gg <- visualise(HMEC_vs_TNBC_out, chr = chrom, title = chrom) 
+  gg <- gg + theme(axis.title.y = element_blank(), legend.position = "none")
+  # readline(prompt="Press [enter] to continue")
+  gg_list <- c(gg_list, list(gg))
+}
+combined_plot1 <- wrap_plots(gg_list, ncol = 4)
+ggsave("100kb_HMEC_vs_TNBC_perchr.pdf", combined_plot1, width = 20, height = 16)
+
+
+#下面是HMEC vs MB231
+gg_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+  gg <- visualise(HMEC_vs_MB231_out, chr = chrom, title = chrom) 
+  gg <- gg + theme(axis.title.y = element_blank(), legend.position = "none")
+  # readline(prompt="Press [enter] to continue")
+  gg_list <- c(gg_list, list(gg))
+}
+combined_plot2 <- wrap_plots(gg_list, ncol = 4)
+ggsave("100kb_HMEC_vs_MB231_perchr.pdf", combined_plot2, width = 20, height = 16)
+
+#下面是HMEC vs BT549
+gg_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+  gg <- visualise(HMEC_vs_BT549_out, chr = chrom, title = chrom) 
+  gg <- gg + theme(axis.title.y = element_blank(), legend.position = "none")
+  # readline(prompt="Press [enter] to continue")
+  gg_list <- c(gg_list, list(gg))
+}
+combined_plot3 <- wrap_plots(gg_list, ncol = 4)
+ggsave("100kb_HMEC_vs_BT549_perchr.pdf", combined_plot3, width = 20, height = 16)
+
+
+#下面是HMEC vs HCC70
+gg_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+  gg <- visualise(HMEC_vs_HCC70_out, chr = chrom, title = chrom) 
+  gg <- gg + theme(axis.title.y = element_blank(), legend.position = "none")
+  # readline(prompt="Press [enter] to continue")
+  gg_list <- c(gg_list, list(gg))
+}
+combined_plot4 <- wrap_plots(gg_list, ncol = 4)
+ggsave("100kb_HMEC_vs_HCC70_perchr.pdf", combined_plot4, width = 20, height = 16)
+```
+
+#### Saddle-analyses 
+
+Saddle分析是一种用于比较染色体亚区（compartment）之间相互作用的一种方法。以下是对Saddle分析内容的解释：
+
+Compartment与Compartment分数：
+
+Compartment指的是染色体上的亚区，这些亚区在空间上可能具有不同的结构和功能。
+Compartment分数是对每个亚区进行的一种度量，用于表示该亚区在三维染色体空间中的局部结构或功能。
+Compartment分数的分位数对比分析：
+
+Saddle分析进行了分位数对比，将Compartment分数的分位数区间进行比较。
+对每个染色体臂（chromosome arm），将Compartment分数分为多个分位数（quantile）区间。
+计算观察到的与预期的接触比：
+
+针对每一对分位数区间的组合，计算观察到的与预期的接触比。
+首先，将该分位数区间中所有基因组成对的接触数进行平均。然后，将该分位数区间中所有基因组成对的接触数与与对角线相同距离处的平均接触数相比较，得到观察到的与预期的接触比。
+观察到的与预期的接触比的计算：
+
+观察到的与预期的接触比是通过将两个亚区之间的接触数与相同距离处对角线上的接触数进行比较得到的。
+这种比值允许检测到染色体中的空间亚区之间的相互作用模式是否超过了随机期望的水平。
+总之，Saddle分析提供了对染色体亚区之间相互作用模式的定量比较，通过比较不同Compartment分数分位数区间中的观察到的与预期的接触比，可以揭示染色体结构与功能的相关性。
+
+```{r fig.height=4}
+#滤除M/Y染色体
+HMEC_100kb_cool$CHRS <- HMEC_100kb_cool$CHRS[!(HMEC_100kb_cool$CHRS %in% c("chrM", "chrY"))]
+HCC70_100kb_cool$CHRS <- HCC70_100kb_cool$CHRS[!(HCC70_100kb_cool$CHRS %in% c("chrM", "chrY"))]
+BT549_100kb_cool$CHRS <- BT549_100kb_cool$CHRS[!(BT549_100kb_cool$CHRS %in% c("chrM", "chrY"))]
+MB231_100kb_cool$CHRS <- MB231_100kb_cool$CHRS[!(MB231_100kb_cool$CHRS %in% c("chrM", "chrY"))]
+
+#Compartment versus compartment scores
+#Produces a compartment score quantile versus quantile analysis in which observed over expected contacts are compared between the different quantiles of the compartment scores.
+#Per chromosome arm, compartment scores are divided in quantile bins. Subsequently, the average observed over expected score is calculated for every pairwise combination of bins. The observed over expected score is calculated as the contacts divided by the average of contacts for the same distance from the diagonal.
+#所以前面nbins=50，折中
+#Choosing a 'bins' of 5 will produce results similar to Flyamer et al. (2007), while setting 'bins' to 100 will produce results similar to Bonev et al. (2017)
+#下面分析的saddle——saddle:	A data.table containing quantile-quantile scores for 44 chromosome arms.实际上就是分析区室化分数时bin化的数据框
+
+saddle_out_HMEC_vs_HCC70 = saddle(list(HMEC_100kb_cool, HCC70_100kb_cool), 
+                   CS_discovery = HMEC_vs_HCC70_out,
+                   bins = nbins)
+saddle_out_HMEC_vs_BT549 = saddle(list(HMEC_100kb_cool, BT549_100kb_cool), 
+                                  CS_discovery = HMEC_vs_BT549_out,
+                                  bins = nbins)
+saddle_out_HMEC_vs_MB231 = saddle(list(HMEC_100kb_cool, MB231_100kb_cool), 
+                                  CS_discovery = HMEC_vs_MB231_out,
+                                  bins = nbins)
+saddle_out_HMEC_vs_TNBC = saddle(list(HMEC_100kb_cool, HCC70_100kb_cool,MB231_100kb_cool,BT549_100kb_cool), 
+                                  CS_discovery = HMEC_vs_TNBC_out,
+                                  bins = nbins)
+
+visualise(saddle_out_HMEC_vs_TNBC)  + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+ggsave("100kb_HMEC_vs_TNBC_saddle.pdf", width = 7, height = 7)
+visualise(saddle_out_HMEC_vs_HCC70)  + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+ggsave("100kb_HMEC_vs_HCC70_saddle.pdf", width = 7, height = 7)
+visualise(saddle_out_HMEC_vs_BT549)  + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+ggsave("100kb_HMEC_vs_BT549_saddle.pdf", width = 7, height = 7)
+visualise(saddle_out_HMEC_vs_MB231)  + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+ggsave("100kb_HMEC_vs_MB231_saddle.pdf", width = 7, height = 7)
+
+#大图建议是20+16，小图建议是7+7
+
+```
+
+```{r fig.height=3}
+# # Look through each chromosome对每一条染色体都进行saddle分析，注意是使用上面的saddle_out的分析结果
+# for (chrom in c(1:22, "X", "Y")) {
+#   p <- visualise(saddle_out, chr = chrom, title = chrom) + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+#   print(p)
+#   # readline(prompt="Press [enter] to continue")
+# }
+p_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+p <- visualise(saddle_out_HMEC_vs_TNBC, chr = chrom, title = chrom) + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+p <- p+theme(axis.title.y = element_blank(), legend.position = "none")
+p_list <- c(p_list,list(p))
+   # print(p)
+   # readline(prompt="Press [enter] to continue")
+ }
+wrap_plots(p_list, ncol = 4)
+ggsave("100kb_HMEC_vs_TNBC_saddle_perchr.pdf", width = 20, height = 16)
+#只对HMEC vs TNBC,其余组合就不比对了
+
+
+p_list <- list()
+for (chrom in c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) {
+p <- visualise(saddle_out_HMEC_vs_BT549, chr = chrom, title = chrom) + scale_altfill_continuous(low = mycols[1], high = mycols[2])
+p <- p+theme(axis.title.y = element_blank(), legend.position = "none")
+p_list <- c(p_list,list(p))
+   # print(p)
+   # readline(prompt="Press [enter] to continue")
+ }
+wrap_plots(p_list, ncol = 4)
+ggsave("100kb_HMEC_vs_BT549_saddle_perchr.pdf", width = 20, height = 16)
+
+```
+
+#### Compartment-strength
+saddle disoveries
+can be used to compute compartment strengths.
+对saddle结果的定量化，可以用于分析区室强度
+```{r saddleStrength500, fig.height = 4, fig.width = 4}
+CSS <- quantify(saddle_out_HMEC_vs_TNBC)
+CSS_BT549<- quantify(saddle_out_HMEC_vs_BT549)
+CSS_HCC70 <- quantify(saddle_out_HMEC_vs_HCC70)
+CSS_MB231 <- quantify(saddle_out_HMEC_vs_MB231)
+
+# Exclude short arms where calculations produce outliers排除计算中产生异常值的短臂（short arms）,利用小提琴图直接可视化区室强度，然后查找区室化强度差异大的离散数据，离散区域
+# Check for outliers
+# ggplot(CSS, aes(x = exp, y = strength)) +
+#   geom_boxplot() +
+#   geom_label_repel(aes(label = chr))
+# Manually exclude them
+# CSS <- CSS[!(CSS$chr %in% c("21p", "22p")), ]
+
+
+compared <- tidyr::spread(unique(CSS[,-c(3,4)]), key = 'exp', value = 'strength')
+# Compare compartmentalization strength
+print(paste("Mean compartment strength in HMEC:", mean(compared$HMEC))) 
+print(paste("Mean compartment strength in BT549:", mean(compared$BT549))) 
+print(paste("Mean compartment strength in HCC70:", mean(compared$HCC70))) 
+print(paste("Mean compartment strength in MB231:", mean(compared$MB231))) 
+#这里最好是分开来分析不同类型细胞系的区室，不要3个直接合并之后取mean，因为有的区室强度是比HMEC大，有的是小
+#分情况而言，实际是不一致的，所以不能够直接合并对应的TNBC的数据并取mean
+#即不建议print(paste("Mean compartment strength in TNBC:", mean(c(compared$HCC70,compared$MB231,compared$BT549))))
+print(paste("T-test for HMEC vs BT549:", t.test(compared$HMEC, compared$BT549)$p.value %>% formatC(., format = "e", digits = 5))) 
+print(paste("T-test for HMEC vs HCC70:", t.test(compared$HMEC, compared$HCC70)$p.value %>% formatC(., format = "e", digits = 5))) 
+print(paste("T-test for HMEC vs MB231:", t.test(compared$HMEC, compared$MB231)$p.value %>% formatC(., format = "e", digits = 5))) 
+
+#可以看出在100kb左右分析的结果实际上和500kb是有出入的，从这个结果上来看实际上是HCC70的异质性相比较明显一点，但是p值的话却没有太突出，所以不是很显著，所以效果其实是比500kb的差点，500kb的数据至少有个显著的，100kb虽然直观看差异的对象不是BT549，但是都不显著
+#[1] "Mean compartment strength in HMEC: 3.68075273857614"
+#[1] "Mean compartment strength in BT549: 4.99517600577415"
+#[1] "Mean compartment strength in HCC70: 5.01669893003622"
+#[1] "Mean compartment strength in MB231: 3.90490973205794"
+#[1] "T-test for HMEC vs BT549: 6.31182e-01"
+#[1] "T-test for HMEC vs HCC70: 4.43251e-01"
+#[1] "T-test for HMEC vs MB231: 8.51656e-01"
+
+#下面的小提琴+箱线图展示，实际上就是前面的异常区域排除的前置步骤-可视化，只不过多加了显著检验
+#对于下面图片的处理：1vs3 CSS展示图片为核心（但是设置字幕为false，即不显示计算公式），因为此处比较的算法+p值域前面t检验两两之间差异较大，想必不应该采用
+#其他3个1vs1 CSS对象中字幕设置为true，因为检验p值在公式字幕上，但没有1vs3的bar显示，但是p值与上面t值相接近
+#所以1vs3 CSS图片为核心，将3个1vs1的p值修改到该图片中；同时保存后面3张图片
+ggbetweenstats(data=CSS,
+                x=exp,
+                y=strength,
+               results.subtitle = FALSE,
+               pairwise.display="all",
+                title = "Distribution of compartment strength across HMEC vs TNBC")
+ggsave("100kb_HMEC_vs_TNBC_compartment_strength_Distribution.pdf", width = 7, height = 7)
+ggbetweenstats(data=CSS_BT549,
+               x=exp,
+               y=strength,
+               pairwise.display="all",
+               title = "Distribution of compartment  strength across HMEC vs BT549")
+ggsave("100kb_HMEC_vs_BT549_compartment_strength_Distribution.pdf", width = 7, height = 7)
+ggbetweenstats(data=CSS_HCC70,
+               x=exp,
+               y=strength,
+               pairwise.display="all",
+               title = "Distribution of compartment  strength across HMEC vs HCC70")
+ggsave("100kb_HMEC_vs_HCC70_compartment_strength_Distribution.pdf", width = 7, height = 7)
+ggbetweenstats(data=CSS_MB231,
+               x=exp,
+               y=strength,
+               #results.subtitle = FALSE,
+               pairwise.display="none",
+               title = "Distribution of compartment  strength across HMEC vs MB231")
+ggsave("100kb_HMEC_vs_MB231_compartment_strength_Distribution.pdf", width = 7, height = 7)
+
+#可以依据https://zhuanlan.zhihu.com/p/456212826绘制3 vs 1的检验信息统计图
+# Plot compartment strength differences,设置max_overlap显示全部chr（compared显示为39，我设置为48）
+ggplot(compared, aes(x = HMEC, y = BT549)) +
+  geom_segment(aes(x = 0, xend = 5, y = 0, yend = 5, colour = "grey")) + scale_colour_identity() +
+  geom_point(col = "red") +
+  geom_label_repel(aes(label = chr), force=1, box.padding=0.5, label.padding = 0.1, segment.color = 'grey50', max.overlaps = 48) +
+  theme_bw() + xlim(0, 5) + ylim(0, 5) +
+  labs(title = "Compartment strength comparison between HMEC vs BT549")
+ggsave("100kb_HMEC_vs_BT549_compartment_strength_comparison05.pdf", width = 7, height = 7)
+ggplot(compared, aes(x = HMEC, y = HCC70)) +
+  geom_segment(aes(x = 0, xend = 5, y = 0, yend = 5, colour = "grey")) + scale_colour_identity() +
+  geom_point(col = "red") +
+  geom_label_repel(aes(label = chr), force=1, box.padding=0.5, label.padding = 0.1, segment.color = 'grey50', max.overlaps = 48) +
+  theme_bw() + xlim(0, 5) + ylim(0, 5) +
+  labs(title = "Compartment strength comparison between HMEC vs HCC70")
+ggsave("100kb_HMEC_vs_HCC70_compartment_strength_comparison05.pdf", width = 7, height = 7)
+ggplot(compared, aes(x = HMEC, y = MB231)) +
+  geom_segment(aes(x = 0, xend = 5, y = 0, yend = 5, colour = "grey")) + scale_colour_identity() +
+  geom_point(col = "red") +
+  geom_label_repel(aes(label = chr), force=1, box.padding=0.5, label.padding = 0.1, segment.color = 'grey50', max.overlaps = 48) +
+  theme_bw() + xlim(0, 5) + ylim(0, 5) +
+  labs(title = "Compartment strength comparison between HMEC vs MB231")
+ggsave("100kb_HMEC_vs_MB231_compartment_strength_comparison05.pdf", width = 7, height = 7)
+
+
+
+```
+
+#### Du_et_al_R_processing 借用了其他人的脚本
+https://github.com/qianxidu/Replication_Timing_Du_et_al_2021
+使用 GENOVA v.1.0.0 R 包对 100 kb 分辨率的数据进行了迭代校正。
+使用第一个特征向量（PC1）的值对 100 kb 的区间进行了分组，将其分为 50 个百分位组。
+AB 区室分析：
+在 50 个百分位组的两两组合中，计算了区间之间的平均接触丰度（obs/exp）。
+将接触丰度的 log2 值绘制为热图，形成了 saddle plot（马鞍图）。
+区室强度摘要：
+计算了 A-A 和 B-B 区室的摘要强度，这是在 PC1 百分位的顶部（A-A）或底部（B-B）20% 之间的平均 log2 接触丰度。
+对于 A-B 区室强度，则是在 PC1 百分位的顶部和底部 20% 之间的平均 log2 接触丰度。
+
+
+
+##### Saddle plot, genome-wide 
+这里绘制的也是saddle，注意与前面的进行比对；
+前面的效果是类似于APA，ATA之类，有1vs1的效果，下面的saddle更像是原文中的saddle图（仅仅只是EV值的分解展示，没有1vs1的效果）
+！！！！！！！！！！！！！！！！！！！！！！！！！！！！二者取其一
+先处理HMEC vs BT549，再处理HMEC vs TNBC，看效果择一最终展示
+```{r fig.height=3}
+#--- Figure 4A - saddle plot ----
+# saddle_out from GENOVA
+# head(saddle_out_HMEC_vs_TNBC$saddle) 具体研究的从下面开始就只用saddle_out_HMEC_vs_BT549，因为BT549见前面已经做出来显著性，正好saddle也能和前面区分
+#必要时候可以使用全局1vs3的saddle_out_HMEC_vs_TNBC或者是其他1vs1的3个补充
+dat <- saddle_out_HMEC_vs_BT549$saddle #saddle:	A 98864 x 5 data.table containing quantile-quantile scores for 44 chromosome arms.对应q1、q2应该就是nbin中对区室进行分bin化
+#这个saddle数据框列名是exp chr q1 q2 mean
+dat2 <- dat[which(dat$mean > 0),]  #过滤了 dat 数据中 mean 列大于 0 的行
+
+tmp = setNames(aggregate(log2(dat2$mean), by = list(dat2$q1, dat2$q2, dat2$exp), mean, na.rm = T), c("x",'y','z', "score"))
+#使用 aggregate() 函数对 dat2 数据框中的 mean 列进行聚合操作。具体来说，它按照 q1、q2 和 exp 列的组合进行分组，然后计算每个分组的 mean 列的平均值。参数 na.rm = TRUE 表示在计算平均值时忽略 NA 值，然后将结果重新命名为 x、y、z 和 score.
+#即exp q1 q2 mean重命名为 z、 x、y和 score，注意顺序
+
+#将 tmp 数据中 score 列中小于 -1 和大于 1 的值设置为 -1 和 1，以确保 score 值范围在 -1 到 1 之间，相当于是归一化
+tmp$score[which(tmp$score < -1)] <- -1
+tmp$score[which(tmp$score > 1)] <- 1
+
+comp <- tmp[tmp$x != tmp$y,]  #新的数据框 comp，其中包含 tmp 数据框中 x 列和 y 列不相等的行，即原先q1和q2不相等（应该就是chr bin分区不相等区域）
+colnames(comp) <- c("y", "x", "z", "score")
+comp <- comp[,c("x", "y", "z", "score")]
+#重新排列了 comp 数据框的列的顺序，将 x、y、z 和 score 列调整为指定的顺序——其实可以看得出来xy在新数据框中的顺序是颠倒了，正反一合并，相当于是1 2 value+2 1 value交互的都有了，所以前面对于xy一样的行没有提取出来，应该就是想直接在正向顺序中就展示所有互作的nbin（然后不用去从两列中推导）
+
+df <- rbind(tmp, comp) #就是正反一合并，没有影响，就是正反数据框的合并
+df$z <- factor(df$z, levels=c("HMEC", "BT549")) #将 df 数据框中的 z 列转换为因子变量，并指定因子水平为 "HMEC" 和 "BT549"，其实z就是前面saddle中的exp实验对象
+
+gg <- ggplot(df, aes(x, y, fill = score)) + geom_tile() + scale_x_reverse() +
+  scale_fill_gradientn(colours=rev(c("#B2182B", "white", "#2166AC")), limits=c(-1, 1)) + theme_minimal() + 
+  theme(panel.grid = element_blank()) + ggtitle("saddle") +
+  coord_fixed() + labs(x="bin1", y="bin2") + facet_wrap(~z) # axis.text.x = element_text(angle=90, vjust = 1, hjust = 1), 
+#按照文献中的展示，此处使用的其实是x=y="1st eigenvector"
+gg
+ggsave("100kb_HMEC_vs_BT549_saddle_enrichment_laterbin.pdf", width = 7, height = 7)
+gg <- ggplot(df, aes(x, y, fill = score)) + geom_tile() + scale_x_reverse() +
+  scale_fill_gradientn(colours=rev(c("#B2182B", "white", "#2166AC")), limits=c(-1, 1)) + theme_minimal() + 
+  theme(panel.grid = element_blank()) + ggtitle("saddle") +
+  coord_fixed() + labs(x="1st eigenvector", y="1st eigenvector") + facet_wrap(~z)
+gg
+ggsave("100kb_HMEC_vs_BT549_saddle_enrichment_laterev.pdf", width = 7, height = 7)
+
+
+#下面是对HMEC vs TNBC全体1vs3,同上
+dat <- saddle_out_HMEC_vs_TNBC$saddle 
+dat2 <- dat[which(dat$mean > 0),]  
+tmp = setNames(aggregate(log2(dat2$mean), by = list(dat2$q1, dat2$q2, dat2$exp), mean, na.rm = T), c("x",'y','z', "score"))
+tmp$score[which(tmp$score < -1)] <- -1
+tmp$score[which(tmp$score > 1)] <- 1
+comp <- tmp[tmp$x != tmp$y,]  
+colnames(comp) <- c("y", "x", "z", "score")
+comp <- comp[,c("x", "y", "z", "score")]
+df <- rbind(tmp, comp) 
+df$z <- factor(df$z, levels=c("HMEC", "BT549","HCC70","MB231")) 
+gg <- ggplot(df, aes(x, y, fill = score)) + geom_tile() + scale_x_reverse() +
+  scale_fill_gradientn(colours=rev(c("#B2182B", "white", "#2166AC")), limits=c(-1, 1)) + theme_minimal() + 
+  theme(panel.grid = element_blank()) + ggtitle("saddle") +
+  coord_fixed() + labs(x="1st eigenvector", y="1st eigenvector") + facet_wrap(~z)
+gg
+ggsave("100kb_HMEC_vs_TNBC_saddle_enrichment_laterev.pdf", width = 7, height = 7)
+```
+
+##### Contact enrichment, genome-wide   全基因组角度
+先处理HMEC vs BT549，再处理HMEC vs TNBC，看效果择一最终展示
+
+```{r fig.height=2, fig.width=4}
+#--- Figure 4B ----
+# saddle_out from GENOVA
+# script from GENOVA compartment strength function
+dat = saddle_out_HMEC_vs_BT549$saddle
+dat <- dat[!is.na(dat$q1),] #去除NA
+
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))  #提取实验对象名字HMEC等
+dat$CC <- 'XX'  #建一个名为 CC 的新列，并将其填充为 'XX'
+MAXbin = max(dat$q1)  #就是nbin分bin定量化,50
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+#即 MAXbin 的20%向下取整。如果结果小于1，则将其设置为1
+#binsTOse 变量用于定义一个阈值，用来划分 q1 列的值。具体来说，对于 dat 数据框中的每一行，如果 q1 列的值小于等于 binsTOse，那么该行对应的 CC 列的值会被设置为 "BB"。这样就将数据分成了四个类别："BB"、"AB"、"BA" 和 "AA"
+#！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！这里选取的阈值binsTOse不清楚&下面依据阈值计算AB等为什么是这么算？
+
+
+#注意下面的bin划分的AB实际上是对于exp内部的，还是saddle分析划分方法
+#！！！！！！！！！！！！！！！！！！！！！问题其实和上面一样，为什么阈值binTOse这么设置，为什么下面CC分类是这么算？以及没有AB区域是否就是这么导致的
+#解答：
+#计算了 A-A 和 B-B 区室的摘要强度，这是在 PC1 百分位的顶部（A-A）或底部（B-B）20% 之间的平均 log2 接触丰度，也就是说AA,BB区室强度是选取top 20%或者bottom 20%的pc1百分位计算的contact（这里其实应该意识到按照pc1百分位分组的话前面肯定是A，后面肯定是B;只不过选取的是前面的A以及后面的B），所以是抽出了top的A以及bottom的B，分析互作score如何，比如说top的AA互作在BT549中比HMEC弱等等
+#对于 A-B 区室强度，则是在 PC1 百分位的顶部和底部 20% 之间的平均 log2 接触丰度
+#！！！！！！！！！！！！！！！！！！！！！所以现在的问题是如何解释结果
+
+#根据条件将 dat 数据框中的 CC 列进行设置
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+
+#> "AB" %in% dat$CC
+#[1] FALSE
+#这里要搞清楚做的是什么，再看看如何分析AB
+#> unique(dat$CC)
+#[1] "BB" "XX" "BA" "AA"
+#确实从数据上看，没有AB的区域
+
+dat = dat[dat$CC != 'XX',] #从 dat 数据框中删除 CC 列值为 'XX' 的行
+dat2 <- dat[which(dat$mean > 0),] #从 dat 中选取 mean 列大于0的行，并将结果存储在 dat2 中
+
+#将数据框 dat2 按照 exp 和 CC 两列进行分组，这意味着后续的操作将针对每个不同的 exp（可能是 "PR" 或 "CR"）和 CC（可能是 "AA"、"BB"、"AB" 或 "BA"）组合进行计算。使用 summarise() 函数计算每个组合的平均 log2 接触丰度（mean 列的平均值），具体来说，它首先计算了 每一行mean 列的 log2 值，然后对分组内的这些 log2 值进行平均计算。最终结果将存储在一个名为 score 的新列中，所以是先log2再mean即平均 log2 接触丰度
+cescores = dplyr::summarise(dplyr::group_by(dat2,
+                                       exp,
+                                       CC),score = mean(log2(mean)))
+
+
+## values of cescores are plotted in ，将 cescores 数据框中的 exp 和 CC 列转换为因子变量，并指定因子水平
+cescores$exp <- factor(cescores$exp, levels =  c("HMEC", "BT549"))
+cescores$CC  <- factor(cescores$CC, levels = c("AA", "BB", "BA"))
+ggplot(cescores, aes(x = exp, y = score, fill = exp)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = mycols[1:2]) +
+  theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+  facet_wrap(.~CC, scales = "free")
+ggsave("100kb_HMEC_vs_BT549_contact_enrichment.pdf", width = 10, height = 7)
+
+
+
+#下面是HMEC vs TNBC，即1vs3的，同上
+dat = saddle_out_HMEC_vs_TNBC$saddle
+dat <- dat[!is.na(dat$q1),] 
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))  
+dat$CC <- 'XX'  
+MAXbin = max(dat$q1)  
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+
+#> "AB" %in% dat$CC
+#[1] FALSE
+#这里要搞清楚做的是什么，再看看如何分析AB
+#> unique(dat$CC)
+#[1] "BB" "XX" "BA" "AA"
+#确实从数据上看，没有AB的区域
+
+dat = dat[dat$CC != 'XX',] 
+dat2 <- dat[which(dat$mean > 0),] 
+
+cescores = dplyr::summarise(dplyr::group_by(dat2,
+                                       exp,
+                                       CC),score = mean(log2(mean)))
+
+cescores$exp <- factor(cescores$exp, levels =  c("HMEC", "BT549","HCC70","MB231"))
+cescores$CC  <- factor(cescores$CC, levels = c("AA", "BB", "BA"))
+ggplot(cescores, aes(x = exp, y = score, fill = exp)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = mycols[1:4]) +
+  theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+  facet_wrap(.~CC, scales = "free")
+ggsave("100kb_HMEC_vs_TNBC_contact_enrichment.pdf", width = 10, height = 7)
+
+#mycols[1:2] 是一个包含两种颜色的向量，这两种颜色用于表示不同的实验（exp 列）,此处修改为4
+
+
+
+```
+
+##### Contact enrichment, per chromosome 单染色体
+先处理HMEC vs BT549，再处理HMEC vs TNBC，看效果择一最终展示
+
+```{r fig.height=20}
+#循环for内部的代码处理实际上和前面全局处理一致
+dat = saddle_out_HMEC_vs_BT549$saddle
+dat <- dat[!is.na(dat$q1),]
+# Sort chromosome arms in logical order获取数据中唯一的染色体信息，并按逻辑顺序排序
+chromosomes <- unique(dat$chr) %>% gtools::mixedsort()
+gg_list <- list()
+for (chrom in chromosomes) {
+  dat_selected <- dat %>% filter(chr == chrom)
+
+  namesVector <- c()
+  namesVector <- c(namesVector, unique(dat_selected$exp))
+  dat_selected$CC <- 'XX'
+  MAXbin = max(dat_selected$q1)
+  binsTOse = floor(MAXbin * .2)
+  binsTOse = max(1, binsTOse)
+  dat_selected[dat_selected$q1 <= binsTOse & dat_selected$q2 <= binsTOse,"CC"] = "BB"
+  dat_selected[dat_selected$q2 <= binsTOse & dat_selected$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+  dat_selected[dat_selected$q1 <= binsTOse & dat_selected$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+  dat_selected[dat_selected$q1 >= MAXbin-binsTOse+1 & dat_selected$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+  dat_selected = dat_selected[dat_selected$CC != 'XX',]
+  dat_selected2 <- dat_selected[which(dat_selected$mean > 0),]
+  cescores_selected = dplyr::summarise(dplyr::group_by(dat_selected2,
+                                              exp,
+                                              CC),score = mean(log2(mean)))
+  ## values of cescores_selected are plotted in 
+  cescores_selected$exp <- factor(cescores_selected$exp, levels = c("HMEC", "BT549"))
+  cescores_selected$CC  <- factor(cescores_selected$CC, levels = c("AA", "BB", "BA"))
+  gg <- ggplot(cescores_selected, aes(x = CC, y = score, fill = exp)) +
+    geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.9)) +
+    scale_fill_manual(values = mycols[1:2]) +
+    theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+    ggtitle(chrom)
+  gg_list <- c(gg_list, list(gg))
+}
+p_combined<-wrap_plots(gg_list, ncol = 4)
+ggsave("100kb_HMEC_vs_BT549_contact_enrichment_perchr.pdf", p_combined,width = 20, height = 16)
+
+
+
+#下面是HMEC vs TNBC,同上
+dat = saddle_out_HMEC_vs_TNBC$saddle
+dat <- dat[!is.na(dat$q1),]
+chromosomes <- unique(dat$chr) %>% gtools::mixedsort()
+gg_list <- list()
+for (chrom in chromosomes) {
+  dat_selected <- dat %>% filter(chr == chrom)
+
+  namesVector <- c()
+  namesVector <- c(namesVector, unique(dat_selected$exp))
+  dat_selected$CC <- 'XX'
+  MAXbin = max(dat_selected$q1)
+  binsTOse = floor(MAXbin * .2)
+  binsTOse = max(1, binsTOse)
+  dat_selected[dat_selected$q1 <= binsTOse & dat_selected$q2 <= binsTOse,"CC"] = "BB"
+  dat_selected[dat_selected$q2 <= binsTOse & dat_selected$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+  dat_selected[dat_selected$q1 <= binsTOse & dat_selected$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+  dat_selected[dat_selected$q1 >= MAXbin-binsTOse+1 & dat_selected$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+  dat_selected = dat_selected[dat_selected$CC != 'XX',]
+  dat_selected2 <- dat_selected[which(dat_selected$mean > 0),]
+  cescores_selected = dplyr::summarise(dplyr::group_by(dat_selected2,
+                                              exp,
+                                              CC),score = mean(log2(mean)))
+  ## values of cescores_selected are plotted in 
+  cescores_selected$exp <- factor(cescores_selected$exp, levels = c("HMEC", "BT549","HCC70","MB231"))
+  cescores_selected$CC  <- factor(cescores_selected$CC, levels = c("AA", "BB", "BA"))
+  gg <- ggplot(cescores_selected, aes(x = CC, y = score, fill = exp)) +
+    geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.9)) +
+    scale_fill_manual(values = mycols[1:4]) +
+    theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+    ggtitle(chrom)
+  gg_list <- c(gg_list, list(gg))
+}
+p_combined<-wrap_plots(gg_list, ncol = 4)
+ggsave("100kb_HMEC_vs_TNBC_contact_enrichment_perchr.pdf", p_combined,width = 20, height = 16)
+
+```
+
+##### Compartmentalization score, genome-wide 
+
+taking the ratio between (AA+BB) / (AB+BA). This corresponds visually to the ratio between the upper left and lower right corners, versus the lower left and upper right corners in the plot above.
+区室分数的计算公式是通过计算 (AA + BB) 与 (AB + BA) 的比值来表示。这一比值代表了热图中左上角（AA + BB）与右下角（AB + BA）之间的比值，与左下角（AB + BA）与右上角（AA + BB）之间的比值相对应
+先处理HMEC vs BT549，再处理HMEC vs TNBC，看效果择一最终展示
+
+```{r fig.height=2, fig.width=3}
+#--- Figure 4C ----
+#下面处理的是dat2，与前一部分处理的dat不同，为避免混淆，查看源代码，还是从saddle分析上游重建dat2数据对象
+dat = saddle_out_HMEC_vs_BT549$saddle
+dat <- dat[!is.na(dat$q1),]
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))
+dat$CC <- 'XX'
+MAXbin = max(dat$q1)
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+dat = dat[dat$CC != 'XX',]
+dat2 <- dat[which(dat$mean > 0),]
+#重建dat2对象完毕
+
+
+##对dat2数据框按照chr、exp和CC列进行分组，并计算每组的mean列的均值，并将结果赋值给tmp
+tmp = dplyr::summarise(dplyr::group_by(dat2, chr,
+                                       exp,
+                                       CC),score = mean(mean))
+df.tmp <- as.data.frame(tmp)
+df.tmp <- reshape2::dcast(df.tmp, exp + chr ~ CC)
+#reshape2包中的dcast函数用于将长格式的数据框转换为宽格式的数据框。在这里，df.tmp数据框中的数据是长格式的，即每个观测值占据一行，而exp和chr列是标识变量，而CC列是数值变量。通过dcast函数，我们将exp和chr列作为标识变量，CC列作为新的列名，mean列的值填充到相应的位置，从而得到了一个新的宽格式的数据框
+#使用 reshape2 包中的 dcast() 函数将数据重新排列，使每个染色体和实验都有对应的 A-A、B-B、BA 和 AB 的评分
+#从结果上来看是将AA,BA,AB等转换成了新的一列
+df.tmp$compscore <- log((df.tmp$AA*df.tmp$BB)/(df.tmp$BA^2))
+#计算区室化评分，其公式为 log((AA * BB) / (BA^2))
+#这里的计算公式为什么是这样的!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#taking the ratio between (AA+BB) / (AB+BA). This corresponds visually to the ratio between the upper left and lower right corners, versus the lower left and upper right corners in the plot above.
+
+df.tmp$exp <- factor(df.tmp$exp, levels=c("HMEC", "BT549"))
+#对区室化评分进行汇总，计算每个实验的平均值，并将结果存储在名为 df.hd 的数据框中
+df.hd <- dplyr::summarise(dplyr::group_by(df.tmp[is.finite(df.tmp$compscore),], exp), score = mean(compscore))
+## values of df.hd are plotted in 4B
+df.hd$exp <- factor(df.hd$exp, levels = c("HMEC", "BT549"))
+ggplot(df.hd, aes(x = exp, y = score, fill = exp)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = mycols[1:2]) +
+  theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10),plot.title = element_text(hjust = 0.5))+
+  labs(y="log(A-A*B-B/A-B^2)",title = "Compartmentalization Score") 
+ggsave("100kb_HMEC_vs_BT549_Compartmentalization_score.pdf", width = 7, height = 7)
+
+
+
+#下面是HMEC vs TNBC，同上
+dat = saddle_out_HMEC_vs_TNBC$saddle
+dat <- dat[!is.na(dat$q1),]
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))
+dat$CC <- 'XX'
+MAXbin = max(dat$q1)
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+dat = dat[dat$CC != 'XX',]
+dat2 <- dat[which(dat$mean > 0),]
+
+tmp = dplyr::summarise(dplyr::group_by(dat2, chr,
+                                       exp,
+                                       CC),score = mean(mean))
+df.tmp <- as.data.frame(tmp)
+df.tmp <- reshape2::dcast(df.tmp, exp + chr ~ CC)
+df.tmp$compscore <- log((df.tmp$AA*df.tmp$BB)/(df.tmp$BA^2))
+df.tmp$exp <- factor(df.tmp$exp, levels=c("HMEC", "BT549","HCC70","MB231"))
+df.hd <- dplyr::summarise(dplyr::group_by(df.tmp[is.finite(df.tmp$compscore),], exp), score = mean(compscore))
+df.hd$exp <- factor(df.hd$exp, levels = c("HMEC", "BT549","HCC70","MB231"))
+ggplot(df.hd, aes(x = exp, y = score, fill = exp)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = mycols[1:4]) +
+  theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10),plot.title = element_text(hjust = 0.5))+
+  labs(y="log(A-A*B-B/A-B^2)",title = "Compartmentalization Score") 
+ggsave("100kb_HMEC_vs_TNBC_Compartmentalization_score.pdf", width = 7, height = 7)
+```
+
+##### Compartmentalization score, chromosome-specific 单染色体角度
+先处理HMEC vs BT549，再处理HMEC vs TNBC，看效果择一最终展示
+
+```{r fig.height=20}
+#--- Figure 4C ----
+#下面处理的是dat2，同前，为避免混淆，查看源代码，还是从saddle分析上游重建dat2数据对象
+dat = saddle_out_HMEC_vs_BT549$saddle
+dat <- dat[!is.na(dat$q1),]
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))
+dat$CC <- 'XX'
+MAXbin = max(dat$q1)
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+dat = dat[dat$CC != 'XX',]
+dat2 <- dat[which(dat$mean > 0),]
+#重建dat2对象完毕
+
+#和上面一样，循环for内部就是取出染色体子集做分析
+tmp = dplyr::summarise(dplyr::group_by(dat2, chr,
+                                       exp,
+                                       CC),score = mean(mean))
+df.tmp <- as.data.frame(tmp)
+# Sort chromosome arms in logical order
+chromosomes <- unique(dat$chr) %>% gtools::mixedsort()
+gg_list <- list()
+for (chrom in chromosomes) {
+  df.tmp_selected <- df.tmp %>% filter(chr == chrom)
+  df.tmp_selected <- reshape2::dcast(df.tmp_selected, exp + chr ~ CC)
+  df.tmp_selected$compscore <- log((df.tmp_selected$AA*df.tmp_selected$BB)/(df.tmp_selected$BA^2))
+  
+  df.tmp_selected$exp <- factor(df.tmp_selected$exp, levels=c("HMEC", "BT549"))
+  
+  df.hd_selected <- dplyr::summarise(dplyr::group_by(df.tmp_selected[is.finite(df.tmp_selected$compscore),], exp), score = mean(compscore))
+  df.hd_selected$exp <- factor(df.hd_selected$exp, levels = c("HMEC", "BT549"))
+  gg <- ggplot(df.hd_selected, aes(x = exp, y = score, fill = exp)) +
+    geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+    scale_fill_manual(values = mycols[1:2]) +
+    theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+    ggtitle(chrom)
+  gg_list <- c(gg_list, list(gg))
+}
+p_combined<-wrap_plots(gg_list, ncol = 4)
+ggsave("100kb_HMEC_vs_BT549_Compartmentalization_score_perchr.pdf", p_combined,width = 20, height = 16)
+
+
+
+#下面是HMEC vs TNBC，同上
+dat = saddle_out_HMEC_vs_TNBC$saddle
+dat <- dat[!is.na(dat$q1),]
+namesVector <- c()
+namesVector <- c(namesVector, unique(dat$exp))
+dat$CC <- 'XX'
+MAXbin = max(dat$q1)
+binsTOse = floor(MAXbin * .2)
+binsTOse = max(1, binsTOse)
+dat[dat$q1 <= binsTOse & dat$q2 <= binsTOse,"CC"] = "BB"
+dat[dat$q2 <= binsTOse & dat$q1 >= MAXbin-binsTOse+1,"CC"] = "AB"
+dat[dat$q1 <= binsTOse & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "BA"
+dat[dat$q1 >= MAXbin-binsTOse+1 & dat$q2 >= MAXbin-binsTOse+1,"CC"] = "AA"
+dat = dat[dat$CC != 'XX',]
+dat2 <- dat[which(dat$mean > 0),]
+
+tmp = dplyr::summarise(dplyr::group_by(dat2, chr,
+                                       exp,
+                                       CC),score = mean(mean))
+df.tmp <- as.data.frame(tmp)
+chromosomes <- unique(dat$chr) %>% gtools::mixedsort()
+gg_list <- list()
+for (chrom in chromosomes) {
+  df.tmp_selected <- df.tmp %>% filter(chr == chrom)
+  df.tmp_selected <- reshape2::dcast(df.tmp_selected, exp + chr ~ CC)
+  df.tmp_selected$compscore <- log((df.tmp_selected$AA*df.tmp_selected$BB)/(df.tmp_selected$BA^2))
+  
+  df.tmp_selected$exp <- factor(df.tmp_selected$exp, levels=c("HMEC", "BT549","HCC70","MB231"))
+  
+  df.hd_selected <- dplyr::summarise(dplyr::group_by(df.tmp_selected[is.finite(df.tmp_selected$compscore),], exp), score = mean(compscore))
+  df.hd_selected$exp <- factor(df.hd_selected$exp, levels = c("HMEC", "BT549","HCC70","MB231"))
+  gg <- ggplot(df.hd_selected, aes(x = exp, y = score, fill = exp)) +
+    geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.5)) +
+    scale_fill_manual(values = mycols[1:4]) +
+    theme_classic() + theme(axis.line.x=element_blank(), axis.text.y = element_text(size=10)) +
+    ggtitle(chrom)
+  gg_list <- c(gg_list, list(gg))
+}
+p_combined<-wrap_plots(gg_list, ncol = 4)
+ggsave("100kb_HMEC_vs_TNBC_Compartmentalization_score_perchr.pdf", p_combined,width = 20, height = 16)
+
+```
+
+
+
+
+##从下面开始就是TAD等模块的分析!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!：
+
+##Genome-wide analyses全基因角度的质控分析，补充hic-pro
+1，Cis-quantification，建议使用500kb的数据
+染色体内接触的预期数量为90% ~ 93% 假设任何额外的染色体间接触都是由于碎片/噪声造成的，用户可能希望获得尽可能接近90%的顺式百分比
+```{r fig.height=12}
+HMEC_vs_TNBC_cisChrom_out <- cis_trans(list(HMEC_500kb_cool,BT549_500kb_cool,HCC70_500kb_cool,MB231_500kb_cool))
+#这里可以提供整体chr的bed文件，然后提取出数据进行绘制，可以达到文献中类似的效果
+
+barplot(HMEC_vs_TNBC_cisChrom_out$cis, names.arg = HMEC_vs_TNBC_cisChrom_out$sample, ylim = c(0, 100))
+abline(h = HMEC_vs_TNBC_cisChrom_out$cis[1], col = 'red', lty=3)
+abline(h = HMEC_vs_TNBC_cisChrom_out$cis[2], col = 'red', lty=3)
+abline(h = HMEC_vs_TNBC_cisChrom_out$cis[3], col = 'red', lty=3)
+abline(h = HMEC_vs_TNBC_cisChrom_out$cis[4], col = 'red', lty=3)
+#ggsave("500kb_HMEC_vs_TNBC_Cis-quantification.pdf",height=7,width = 7)#直接另存png
+
+#可以提取centromeres数据来看长短臂p，q
+p_arms <- data.frame('chromosome' = centromeres[,1],
+'start' = 0,
+'end' = centromeres[,2])
+q_arms <- data.frame('chromosome' = centromeres[,1],
+'start' = centromeres[,3],
+'end' = hg19_chrom_zht[,2]) #这里使用参考hg19的长度
+HMEC_vs_TNBC_cisChrom_pout <- cis_trans(list(HMEC_500kb_cool,BT549_500kb_cool,HCC70_500kb_cool,MB231_500kb_cool), bed = p_arms)
+barplot(HMEC_vs_TNBC_cisChrom_pout$cis, names.arg = HMEC_vs_TNBC_cisChrom_pout$sample, ylim = c(0, 100))
+abline(h = HMEC_vs_TNBC_cisChrom_pout$cis[1], col = 'red', lty=3)
+abline(h = HMEC_vs_TNBC_cisChrom_pout$cis[2], col = 'red', lty=3)
+abline(h = HMEC_vs_TNBC_cisChrom_pout$cis[3], col = 'red', lty=3)
+abline(h = HMEC_vs_TNBC_cisChrom_pout$cis[4], col = 'red', lty=3)
+
+
+HMEC_vs_TNBC_cisChrom_qout <- cis_trans(list(HMEC_500kb_cool,BT549_500kb_cool,HCC70_500kb_cool,MB231_500kb_cool), bed = q_arms)
+barplot(HMEC_vs_TNBC_cisChrom_qout$cis, names.arg = HMEC_vs_TNBC_cisChrom_qout$sample, ylim = c(0, 100))
+abline(h = HMEC_vs_TNBC_cisChrom_qout$cis[1], col = 'red', lty=3)
+abline(h = HMEC_vs_TNBC_cisChrom_qout$cis[2], col = 'red', lty=3)
+abline(h = HMEC_vs_TNBC_cisChrom_qout$cis[3], col = 'red', lty=3)
+abline(h = HMEC_vs_TNBC_cisChrom_qout$cis[4], col = 'red', lty=3)
+
+```
+
+
+2,trans反式
+最好是观察全局之后再使用局部trans观察易位与否
+trans.compartment.plot
+
+Draw interchromosomal interaction heatmap for a chromosome (arm) with corresponding (cis) compartment scores
+绘制染色体(臂)的染色体间相互作用热图，并附有相应的(顺式)室评分
+
+
+
+3，RCP
+The Relative Contact Probability (RCP) computes the contact probability as a function of genomic distance
+可以与互作曲线相互补充
+使用100kb或者是500kb的数据
+```{r fig.height=12}
+RCP_out_100kb <- RCP(explist = list(HMEC_100kb_cool,BT549_100kb_cool,HCC70_100kb_cool,MB231_100kb_cool))
+visualise(RCP_out_100kb)
+ggsave("100kb_HMEC_vs_TNBC_genova_decay.pdf",height=7,width = 7)
+visualise(RCP_out_100kb,contrast = 1, metric = 'lfc')
+ggsave("100kb_HMEC_vs_TNBC_genova_RCP.pdf",height=7,width = 7)
+
+RCP_out_500kb <- RCP(explist = list(HMEC_500kb_cool,BT549_500kb_cool,HCC70_500kb_cool,MB231_500kb_cool))
+visualise(RCP_out_500kb)
+ggsave("500kb_HMEC_vs_TNBC_genova_decay.pdf",height=7,width = 7)
+visualise(RCP_out_500kb,contrast = 1, metric = 'lfc')
+ggsave("500kb_HMEC_vs_TNBC_genova_RCP.pdf",height=7,width = 7)
+
+
+RCP_out_40kb <- RCP(explist = list(HMEC_40kb_cool,BT549_40kb_cool,HCC70_40kb_cool,MB231_40kb_cool))
+visualise(RCP_out_40kb)
+ggsave("40kb_HMEC_vs_TNBC_genova_decay.pdf",height=7,width = 7)
+visualise(RCP_out_40kb,contrast = 1, metric = 'lfc')
+ggsave("40kb_HMEC_vs_TNBC_genova_RCP.pdf",height=7,width = 7)
+
+
+
+```
+
+3，Matrix plots，可以作为juicebox中的补充，最好有热图
+```{r fig.height=12}
+#HMEC_500kb_cool,BT549_500kb_cool,HCC70_500kb_cool,MB231_500kb_cool
+hic_matrixplot(exp1 = HMEC_500kb_cool,
+               exp2 = BT549_500kb_cool,
+               coplot = 'diff',
+               chrom = 'chr7',
+start = 25e6,
+end=30e6, # upper limit of contacts
+cut.off = 25)
+```
+
+
+4,Insulation评分分析，核心就是TAD call
+```{r fig.height=12}
+#HMEC_500kb_cool,BT549_500kb_cool,HCC70_500kb_cool,MB231_500kb_cool
+#这里可以指定chr+起止位置，或者是指定某个特定区域，或者是提供bed文件，我想测试全局但是不行，只能测试整体chr的，此处使用前面cis中提取出来的p，q短臂
+ID <- insulation_domainogram(
+HMEC_10kb_cool,
+chrom = 'chrX',#chrom = p_arms[1,],chrom = q_arms[1,],
+start = 16e6,
+end = 20e6, 
+window_range = c(1, 101),
+step = 2
+)
+#visualise(ID)
+hic_matrixplot(exp1 = HMEC_10kb_cool,
+chrom = 'chrX',#chrom = p_arms[1,],chrom = q_arms[1,],
+start = 16e6,
+end = 20e6, 
+#tads = WT_TADs, # see ATA
+#tads.type = 'upper', # only plot in lower triangle
+#tads.colour = '#91cf60', # green TAD-borders
+cut.off = 25, # upper limit of contacts
+skipAnn = T) # skip the outside annotation
+#ggsave("10kb_HMEC_matrix_chrx_16-20Mb.pdf",height=10,width = 10)
+plot(ID, minimalist = TRUE)
+ggsave("10kb_HMEC_insulation_chrx_16-20Mb.pdf",height=5,width = 10)
+
+```
+
+
+#insulation_score评估，至少是40kb或者是20kb，反正就是TAD res
+但是没有达到预期的效果，原文中是使用秩和检验+将比对的HMEC两幅图放到了一起
+至于TAD的边界的bed文件，建议是使用hicexplorer的，因为使用genova自身的分析的边界效果很奇怪,后来发现是因为在genova中操作的话获得实际上是TAD的domain的bed文件，并非是边界的bed文件
+！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+```{r fig.height=12}
+#HMEC_40kb_cool,BT549_40kb_cool,HCC70_40kb_cool,MB231_40kb_cool
+HMECvsTNBC_40kb_insulation <- insulation_score(
+list(HMEC_40kb_cool,BT549_40kb_cool,HCC70_40kb_cool,MB231_40kb_cool),
+window = 25)
+visualise(HMECvsTNBC_40kb_insulation,contrast = 1)
+ggsave("40kb_HMECvsTNBC_insulation.pdf",height=10,width = 7)
+#visualise(HMECvsTNBC_40kb_insulation,contrast = 1,raw=T)
+#ggsave("40kb_HMECvsTNBC_insulation_raw.pdf",height=10,width = 7)
+
+#下面函数中的核心在于边界，所以要注意输入bed文件，以TAD边界bed文件为主，比较边界处的绝缘评分
+#当然可以选取其他track，比如说是观察CTCF结合位点上的绝缘评分
+#此处以TAD边界比较为主，按照nature原文，是说在HMEC的TAD边界，所以就选取HMEC的hicexplorer的TAD边界的bed文件，当然可以选取genova自身call出来的边界bed文件
+#这里要先对TAD边界的bed文件做一下处理，只要3列
+bed_file <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_HMEC_boundaries.bed"
+# 使用read.table()函数读取BED文件
+bed_df <- read.table(bed_file, header = FALSE, stringsAsFactors = FALSE)
+# 给数据框添加列名
+colnames(bed_df) <- c("Chromosome", "Start", "End")
+# 显示数据框的前几行
+head(bed_df)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=bed_df[,1:3], bed_pos = 'center')
+ggsave("40kb_HMECvsTNBC_boundary_insulation_hicexplorer.pdf",height=7,width = 7)
+#使用genova自己call出来的TAD
+TADcalls_40kb <- call_TAD_insulation(HMECvsTNBC_40kb_insulation)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TADcalls_40kb$HMEC, bed_pos = 'start')
+ggsave("40kb_HMECvsTNBC_boundary_insulation.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TADcalls_40kb$HMEC, bed_pos = 'center')
+ggsave("40kb_HMECvsTNBC_domain_insulation.pdf",height=7,width = 7)
+#下面是hicexplorer中自身的domain文件
+bed_file <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_HMEC_domains.bed"
+# 使用read.table()函数读取BED文件
+bed_df <- read.table(bed_file, header = FALSE, stringsAsFactors = FALSE)
+# 给数据框添加列名
+colnames(bed_df) <- c("Chromosome", "Start", "End")
+# 显示数据框的前几行
+head(bed_df)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=bed_df[,1:3], bed_pos = 'center')
+ggsave("40kb_HMECvsTNBC_domain_insulation_hicexplorer.pdf",height=7,width = 7)
+
+
+
+
+#下面是20kb的数据
+HMECvsTNBC_20kb_insulation <- insulation_score(
+list(HMEC_20kb_cool,BT549_20kb_cool,HCC70_20kb_cool,MB231_20kb_cool),
+window = 25)
+visualise(HMECvsTNBC_20kb_insulation,contrast = 1)
+bed_file <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/20000_HMEC_boundaries.bed"
+# 使用read.table()函数读取BED文件
+bed_df <- read.table(bed_file, header = FALSE, stringsAsFactors = FALSE)
+# 给数据框添加列名
+colnames(bed_df) <- c("Chromosome", "Start", "End")
+# 显示数据框的前几行
+head(bed_df)
+tornado_insulation(HMECvsTNBC_20kb_insulation,bed=bed_df[,1:3], bed_pos = 'center')
+ggsave("20kb_HMECvsTNBC_boundary_insulation_hicexplorer.pdf",height=7,width = 7)
+
+#其实也可以使用GENOVA中自己call出来的TAD进行分析
+TADcalls_20kb <- call_TAD_insulation(HMECvsTNBC_20kb_insulation)
+tornado_insulation(HMECvsTNBC_20kb_insulation,bed=TADcalls_20kb$HMEC, bed_pos = 'start')
+ggsave("20kb_HMECvsTNBC_boundary_insulation.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_20kb_insulation,bed=TADcalls_20kb$HMEC, bed_pos = 'center')
+ggsave("20kb_HMECvsTNBC_domain_insulation.pdf",height=7,width = 7)
+
+bed_file <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/20000_HMEC_domains.bed"
+# 使用read.table()函数读取BED文件
+bed_df <- read.table(bed_file, header = FALSE, stringsAsFactors = FALSE)
+# 给数据框添加列名
+colnames(bed_df) <- c("Chromosome", "Start", "End")
+# 显示数据框的前几行
+head(bed_df)
+tornado_insulation(HMECvsTNBC_20kb_insulation,bed=bed_df[,1:3], bed_pos = 'center')
+ggsave("20kb_HMECvsTNBC_domain_insulation_hicexplorer.pdf",height=7,width = 7)
+
+
+
+```
+
+#TAD尺寸的统计,40KB——以100kb为单位
+同理对loop数据的处理——以kb为单位
+```{r}
+HMEC_TAD <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40kb/40000_HMEC_domains.bed", header = FALSE, stringsAsFactors = FALSE)
+BT549_TAD <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40kb/40000_BT549_domains.bed", header = FALSE, stringsAsFactors = FALSE)
+HCC70_TAD <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40kb/40000_HCC70_domains.bed", header = FALSE, stringsAsFactors = FALSE)
+MB231_TAD <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40kb/40000_MB231_domains.bed", header = FALSE, stringsAsFactors = FALSE)
+HMEC_TAD$size <- (HMEC_TAD[,3] - HMEC_TAD[,2])/ 100000
+HMEC_TAD$exp <-"HMEC"
+BT549_TAD$size <- (BT549_TAD[,3] - BT549_TAD[,2])/ 100000
+BT549_TAD$exp <-"BT549"
+HCC70_TAD$size <- (HCC70_TAD[,3] - HCC70_TAD[,2])/ 100000
+HCC70_TAD$exp <-"HCC70"
+MB231_TAD$size <- (MB231_TAD[,3] - MB231_TAD[,2])/ 100000
+MB231_TAD$exp <-"MB231"
+
+
+HMEC_vs_TNBC_TADsize <- rbind(HMEC_TAD[c("exp", "size")],BT549_TAD[c("exp", "size")],HCC70_TAD[c("exp", "size")],MB231_TAD[c("exp", "size")])
+ggbetweenstats(data=HMEC_vs_TNBC_TADsize,
+               x=exp,
+               y=size,
+              results.subtitle = TRUE,
+               pairwise.display="all")
+ggsave("40kb_HMEC_vs_TNBC_TADsize.pdf", width = 7, height = 7)
+
+
+
+
+#同理对loop数据的处理
+HMEC_loop <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_HMEC_common_10000_summit.bed", header = TRUE, stringsAsFactors = FALSE)
+BT549_loop <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/loops_BT549_all_10000_summit.bed", header = TRUE, stringsAsFactors = FALSE)
+HCC70_loop <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/loops_HCC70_all_10000_summit.bed", header = TRUE, stringsAsFactors = FALSE)
+MB231_loop <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/loops_MB231_all_10000_summit.bed", header = TRUE, stringsAsFactors = FALSE)
+TNBC_loop <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_TNBC_all_10000_summit.bed", header = TRUE, stringsAsFactors = FALSE)
+HMEC_loop$size <- (HMEC_loop[,3] - HMEC_loop[,2])/ 1000
+HMEC_loop$exp <-"HMEC"
+BT549_loop$size <- (BT549_loop[,3] - BT549_loop[,2])/ 1000
+BT549_loop$exp <-"BT549"
+HCC70_loop$size <- (HCC70_loop[,3] - HCC70_loop[,2])/ 1000
+HCC70_loop$exp <-"HCC70"
+MB231_loop$size <- (MB231_loop[,3] - MB231_loop[,2])/ 1000
+MB231_loop$exp <-"MB231"
+TNBC_loop$size <- (TNBC_loop[,3] - TNBC_loop[,2])/ 1000
+TNBC_loop$exp <-"TNBC"
+HMEC_vs_TNBC_loopsize <- rbind(HMEC_loop[c("exp", "size")],BT549_loop[c("exp", "size")],HCC70_loop[c("exp", "size")],MB231_loop[c("exp", "size")],TNBC_loop[c("exp", "size")])
+ggbetweenstats(data=HMEC_vs_TNBC_loopsize,
+               x=exp,
+               y=size,
+              results.subtitle = TRUE,
+               pairwise.display="all")
+ggsave("10kb_HMEC_vs_TNBC_loopsize.pdf", width = 7, height = 7)
+```
+
+
+#下面使用其他的bed文件进行绝缘评分的分析
+```{r}
+#可以试一下其他的bed文件：
+#1，SE的文件：
+HMEC_allE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/HMEC_allE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+HMEC_TE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/HMEC_TE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+HMEC_SE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/HMEC_SE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+TNBC_allE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/TNBC_allE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+TNBC_TE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/TNBC_TE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+TNBC_SE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/TNBC_SE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+
+#首先要对这些区域进行统计，就是size，可以使用ggstat，但是使用ggstat数据之前要对数据进行修改
+HMEC_allE$exp <- "HMEC"  #29737
+HMEC_TE$exp <- "HMEC"  
+HMEC_SE$exp <- "HMEC"  
+TNBC_allE$exp <- "TNBC"
+TNBC_TE$exp <- "TNBC"
+TNBC_SE$exp <- "TNBC"
+
+HMEC_vs_TNBC_allE <- rbind(HMEC_allE[c("exp", "CONSTITUENT_SIZE")],TNBC_allE[c("exp", "CONSTITUENT_SIZE")])
+HMEC_vs_TNBC_TE <- rbind(HMEC_TE[c("exp", "CONSTITUENT_SIZE")],TNBC_TE[c("exp", "CONSTITUENT_SIZE")])
+HMEC_vs_TNBC_SE <- rbind(HMEC_SE[c("exp", "CONSTITUENT_SIZE")],TNBC_SE[c("exp", "CONSTITUENT_SIZE")])
+
+HMEC_vs_TNBC_allE %>% 
+  mutate(size = CONSTITUENT_SIZE/1000) %>%
+ggbetweenstats(
+               x=exp,
+               y=size,
+              results.subtitle = TRUE,
+               pairwise.display="all")
+ggsave("HMEC_vs_TNBC_allE_size100.pdf", width = 7, height = 7)
+HMEC_vs_TNBC_TE %>% 
+  mutate(size = CONSTITUENT_SIZE/1000) %>%
+ggbetweenstats(
+               x=exp,
+               y=size,
+              results.subtitle = TRUE,
+               pairwise.display="all")
+ggsave("HMEC_vs_TNBC_TE_size100.pdf", width = 7, height = 7)
+HMEC_vs_TNBC_SE %>% 
+  mutate(size = CONSTITUENT_SIZE/1000) %>%
+ggbetweenstats(
+               x=exp,
+               y=size,
+              results.subtitle = TRUE,
+               pairwise.display="all")
+ggsave("HMEC_vs_TNBC_SE_size100.pdf", width = 7, height = 7)
+
+#从这里的size分布图其实可以看出来大致size都在100kb左右，所以默认的1mb范围是够看的，主要是对SE而言
+
+#鉴于计算以及时间原因，暂时只使用40kb下的数据进行分析展示
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_allE[,1:3], bed_pos = 'center')
+ggsave("40kb_HMECvsTNBC_insulation_HMECallE.pdf",height=7,width = 7)
+#TE
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_TE[,1:3], bed_pos = 'center')
+ggsave("40kb_HMECvsTNBC_insulation_HMECTE.pdf",height=7,width = 7)
+#SE
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_SE[,1:3], bed_pos = 'center')
+ggsave("40kb_HMECvsTNBC_insulation_HMECSE.pdf",height=7,width = 7)
+
+
+#除了e区域内部，其实还可以看一下边界区域，因为内部的话涉及到区域size的问题，无法区分边界以及整体，但是指定了边界之后就可以识别SE区域的进准feature
+#all E
+
+#暂时全部使用20kb，因为40kb的数据分析太耗费时间了,至于区域绘制，到底是1kb，10kb还是100kb
+#对于SE，最大在100kb左右，中值在10kb左右
+#还有个问题就是这里到底要使用比对的HMEC的数据，还是各自使用各自的数据，这里都是比对HMEC中的数据
+#然后暂时因为对应的数据上使用全部的e文件的话最后绘制处理会非常麻烦，1所以暂时只使用SE对应的bed文件
+#然后下面就是想详细的看一下对应的区域的形状以及信号在边界的分布
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TADcalls_40kb$HMEC, bed_pos = 'center')
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_SE[,1:3], bed_pos = 'start', region_width = 2e+05)
+ggsave("40kb_HMECvsTNBC_insulation_HMECSE_start1.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_SE[,1:3], bed_pos = 'center', region_width = 1e+05)  
+ggsave("40kb_HMECvsTNBC_insulation_HMECSE_center1.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_SE[,1:3], bed_pos = 'center', region_width = 2e+05)
+ggsave("40kb_HMECvsTNBC_insulation_HMECSE_center2.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_SE[,1:3], bed_pos = 'center', region_width = 1e+06)
+ggsave("40kb_HMECvsTNBC_insulation_HMECSE_center3.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_SE[,1:3], bed_pos = 'center', region_width = 1e+07)
+ggsave("40kb_HMECvsTNBC_insulation_HMECSE_center4.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_SE[,1:3], bed_pos = 'center', region_width = 1e+08)
+ggsave("40kb_HMECvsTNBC_insulation_HMECSE_center5.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_SE[,1:3], bed_pos = 'center', region_width = 2e+08)  #前面看perchr全长max在2e8范围，所以不使用1e9会报错，使用2e8
+ggsave("40kb_HMECvsTNBC_insulation_HMECSE_center6.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_SE[,1:3], bed_pos = 'end', region_width = 2e+05)
+ggsave("40kb_HMECvsTNBC_insulation_HMECSE_end1.pdf",height=7,width = 7)
+
+
+#然后这里还有对应的TNBC中的SE的bed文件，同样可以查看,使用各自对应的SE的bed文件之后进行比对
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TNBC_SE[,1:3], bed_pos = 'start', region_width = 2e+05)
+ggsave("40kb_HMECvsTNBC_insulation_TNBCSE_start1.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TNBC_SE[,1:3], bed_pos = 'center', region_width = 1e+05)
+ggsave("40kb_HMECvsTNBC_insulation_TNBCSE_center1.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TNBC_SE[,1:3], bed_pos = 'center', region_width = 2e+05)
+ggsave("40kb_HMECvsTNBC_insulation_TNBCSE_center2.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TNBC_SE[,1:3], bed_pos = 'center', region_width = 1e+06)
+ggsave("40kb_HMECvsTNBC_insulation_TNBCSE_center3.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TNBC_SE[,1:3], bed_pos = 'center', region_width = 1e+07)
+ggsave("40kb_HMECvsTNBC_insulation_TNBCSE_center4.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TNBC_SE[,1:3], bed_pos = 'center', region_width = 1e+08)
+ggsave("40kb_HMECvsTNBC_insulation_TNBCSE_center5.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TNBC_SE[,1:3], bed_pos = 'center', region_width = 2e+08)  #前面看perchr全长max在2e8范围
+ggsave("40kb_HMECvsTNBC_insulation_TNBCSE_center6.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=TNBC_SE[,1:3], bed_pos = 'end', region_width = 2e+05)
+ggsave("40kb_HMECvsTNBC_insulation_TNBCSE_end1.pdf",height=7,width = 7)
+
+ 
+
+ggsave("40kb_HMECvsTNBC_insulation_HMECallE.pdf",height=7,width = 7)
+#TE
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_TE[,1:3], bed_pos = 'center')
+ggsave("40kb_HMECvsTNBC_insulation_HMECTE.pdf",height=7,width = 7)
+#SE
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_SE[,1:3], bed_pos = 'center')
+ggsave("40kb_HMECvsTNBC_insulation_HMECSE.pdf",height=7,width = 7)
+
+
+
+#2，CTCF的bed文件
+#但是这里使用的CTCF的bed文件只有HMEC的，如果要使用TNBC的需要合并或者是取交集,如果是取并集的话最后获得peak数量上差距会非常大
+HMEC_CTCF <- read.table( "/mnt/disk4/haitao/bysj_seu/geo_data/other_omics/CTCF/rawfq/CTCF/HMEC/HMEC_peaks.narrowPeak", header = FALSE, stringsAsFactors = FALSE)  #9,592
+TNBC_CTCF <- read.table( "/mnt/disk4/haitao/bysj_seu/geo_data/other_omics/CTCF/rawfq/CTCF/TNBC/TNBC_peaks_sort.narrowPeak", header = FALSE, stringsAsFactors = FALSE) #91,863
+#TNBC_CTCF_intersect <- 
+
+#还是暂时先处理40kb下的数据，数据处理上咱叔吹了不了TNBC中的CTCF的bed数据，而且从比对意义上来讲只有使用HMEC的初始数据进行准变分析
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_CTCF[,1:3], bed_pos = 'center')  
+ggsave("40kb_HMECvsTNBC_insulation_HMECCTCF.pdf",height=7,width = 7)
+tornado_insulation(HMECvsTNBC_20kb_insulation,bed=HMEC_CTCF[,1:3], bed_pos = 'center')
+ggsave("20kb_HMECvsTNBC_insulation_HMECCTCF.pdf",height=7,width = 7)
+   
+  
+
+#3，K27ac的文件
+HMEC_k27ac <- read.table( "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/HMEC_H3K27ac_peaks.narrowPeak", header = FALSE, stringsAsFactors = FALSE)  
+tornado_insulation(HMECvsTNBC_40kb_insulation,bed=HMEC_k27ac[,1:3], bed_pos = 'center')  
+ggsave("40kb_HMECvsTNBC_insulation_HMECk27ac.pdf",height=7,width = 7)
+
+
+#正好这里有SE文件，试一下virtual 4C
+test <- virtual_4C(list(HMEC_40kb_cool,BT549_40kb_cool,HCC70_40kb_cool,MB231_40kb_cool),"chr1:30,000,000-40,000,000")
+visualise(test)
+test$data
+ggplot(test$data, aes(mid))+
+  geom_area(aes(y = HMEC))
+```
+
+
+ATA分析,同样是40kb+20kb的res分析
+同样有个问题，就是TAD文件到底是使用GENOVA产生的，还是使用hicexplorer自己产生的
+注意比对的时候使用的同样是HMEC的bed文件 
+
+40kb的效果太差了，建议将20kb+10kb
+如果是使用hicexplorer的，注意此处使用的不是边界的bed文件，是TAD本身的bed文件，和上面的不v一样
+实际效果上，GENOVA和hicexplorer中的TAD的domain文件的效果差不多
+
+
+需要注意的是这里ATA分析中最后的数据处理还有后续的方法
+主要是定量化分析中的3个选项，对应的是的cornerpeak，insulation，checker
+然后一般使用的ATA分析中的选项就是默认deinsulation
+ 
+```{r fig.height=12} 
+#HMEC_40kb_cool,BT549_40kb_cool,HCC70_40kb_cool,MB231_40kb_cool
+
+#40kb,下面的之前都已经操作过了，就是TAD文件的选取，先选用genova自己的
+#HMECvsTNBC_40kb_insulation <- insulation_score(
+#list(HMEC_40kb_cool,BT549_40kb_cool,HCC70_40kb_cool,MB231_40kb_cool),
+#window = 25)
+#TADcalls_40kb <- call_TAD_insulation(HMECvsTNBC_40kb_insulation)
+ATA_HEMCvsTNBC_40kb_genova <- ATA(list("HMEC" = HMEC_40kb_cool,
+'BT549' = BT549_40kb_cool,'HCC70' = HCC70_40kb_cool,'MB231' = MB231_40kb_cool),
+bed = TADcalls_40kb$HMEC)
+ 
+visualise(ATA_HEMCvsTNBC_40kb_genova,
+colour_lim = c(0,50), 
+colour_lim_contrast = c(-5,5),
+metric = "diff",
+focus = 1)               
+ggsave("40kb_HMECvsTNBC_ATA_genova.pdf",height=7,width = 7)
+
+
+# TAD的一些问题+原始数据res不够，建议使用更高的res，起码是20kb+10kb
+#选用hicexplorer的
+bed_file_HMEC_40kb <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_HMEC_domains.bed"
+bed_df_HMEC_40kb <- read.table(bed_file_HMEC_40kb , header = FALSE, stringsAsFactors = FALSE)
+colnames(bed_df_HMEC_40kb) <- c("Chromosome", "Start", "End")
+ATA_HEMCvsTNBC_40kb <- ATA(list("HMEC" = HMEC_40kb_cool,
+'BT549' = BT549_40kb_cool,'HCC70' = HCC70_40kb_cool,'MB231' = MB231_40kb_cool),
+bed = bed_df_HMEC_40kb[,1:3]) #注意这里使用的是domain的bed文件，只需要3列，所以domain的bed文件只需要前3列，其实domian的bed文件的后面几列的坐标信息是和前面一样的，所以提供完整的bed文件和提供前3列都可以作用
+visualise(ATA_HEMCvsTNBC_40kb,
+colour_lim = c(0,50),
+colour_lim_contrast = c(-5,5),
+metric = "diff",
+focus = 1)
+ggsave("40kb_HMECvsTNBC_ATA_hicexplorer.pdf",height=7,width = 7)
+  
+
+  
+
+
+#下面是20kb的
+ATA_HEMCvsTNBC_20kb_genova <- ATA(list("HMEC" = HMEC_20kb_cool,
+'BT549' = BT549_20kb_cool,'HCC70' = HCC70_20kb_cool,'MB231' = MB231_20kb_cool),
+bed = TADcalls_20kb$HMEC)
+
+visualise(ATA_HEMCvsTNBC_20kb_genova,
+colour_lim = c(0,50),
+colour_lim_contrast = c(-5,5),
+metric = "diff",
+focus = 1) 
+ggsave("20kb_HMECvsTNBC_ATA_genova.pdf",height=7,width = 7)
+
+#下面代码的res也不够，需要使用hicexplorer中至少10kb的res数据
+#选用hicexplorer的
+bed_file_HMEC_20kb <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/20000_HMEC_domains.bed"
+bed_df_HMEC_20kb <- read.table(bed_file_HMEC_20kb , header = FALSE, stringsAsFactors = FALSE)
+colnames(bed_df_HMEC_20kb) <- c("Chromosome", "Start", "End")
+ATA_HEMCvsTNBC_20kb <- ATA(list("HMEC" = HMEC_20kb_cool,
+'BT549' = BT549_20kb_cool,'HCC70' = HCC70_20kb_cool,'MB231' = MB231_20kb_cool),
+bed = bed_df_HMEC_20kb[,1:3])
+
+visualise(ATA_HEMCvsTNBC_20kb,    
+colour_lim = c(0,50),   
+colour_lim_contrast = c(-5,5),
+metric = "diff",
+focus = 1)
+ggsave("20kb_HMECvsTNBC_ATA_hicexplorer.pdf",height=7,width = 7)
+
+   
+
+  
+
+#10kb的试一试，因为20kb以及40kb的数据效果不是很好
+#事实证明是分辨率太低的原因，10kb res数据显示的效果就比20kb以及40kb的好
+HMECvsTNBC_10kb_insulation <- insulation_score(
+list(HMEC_10kb_cool,BT549_10kb_cool,HCC70_10kb_cool,MB231_10kb_cool),window = 25)
+TADcalls_10kb <- call_TAD_insulation(HMECvsTNBC_10kb_insulation)
+ATA_HEMCvsTNBC_10kb_genova <- ATA(list("HMEC" = HMEC_10kb_cool,
+'BT549' = BT549_10kb_cool,'HCC70' = HCC70_10kb_cool,'MB231' = MB231_10kb_cool),
+bed = TADcalls_10kb$HMEC)
+   
+visualise(ATA_HEMCvsTNBC_10kb_genova,
+colour_lim = c(0,50),
+colour_lim_contrast = c(-5,5), 
+metric = "diff",
+focus = 1) 
+ggsave("10kb_HMECvsTNBC_ATA_genova.pdf",height=7,width = 7)
+    
+#10kb的hicexplorer数据
+bed_file_HMEC_10kb <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/10000_HMEC_domains.bed"
+bed_df_HMEC_10kb <- read.table(bed_file_HMEC_10kb , header = FALSE, stringsAsFactors = FALSE)
+colnames(bed_df_HMEC_10kb) <- c("Chromosome", "Start", "End")
+ATA_HEMCvsTNBC_10kb <- ATA(list("HMEC" = HMEC_10kb_cool,
+'BT549' = BT549_10kb_cool,'HCC70' = HCC70_10kb_cool,'MB231' = MB231_10kb_cool),
+bed = bed_df_HMEC_10kb[,1:3])
+    
+visualise(ATA_HEMCvsTNBC_10kb, 
+colour_lim = c(0,50),
+colour_lim_contrast = c(-5,5),
+metric = "diff",
+focus = 1)
+ggsave("10kb_HMECvsTNBC_ATA_hicexplorer.pdf",height=7,width = 7)
+ 
+  
+#下面对10kb的数据进行定量化分析:ATA_HEMCvsTNBC_10kb_genova以及使用hicexploer数据的ATA_HEMCvsTNBC_10kb
+quantifyATA_HEMCvsTNBC_10kb_genova <- quantify(ATA_HEMCvsTNBC_10kb_genova)
+quantifyATA_HEMCvsTNBC_10kb <- quantify(ATA_HEMCvsTNBC_10kb)
+   
+   
+#这里需要对于定量化ATA进行更加深入的分析，主要是quantify函数中对于ATA分析结果的函数处理会聚焦于不同的区域，对于ATA分析而言主要是region选择的shape函数的3个选项 
+quantifyATA_HEMCvsTNBC_10kb_genova <- quantify(ATA_HEMCvsTNBC_10kb_genova)
+quantifyATA_HEMCvsTNBC_10kb_genova_insulation <- quantify(ATA_HEMCvsTNBC_10kb_genova,shape ="insulation")
+quantifyATA_HEMCvsTNBC_10kb_genova_cornerpeak <- quantify(ATA_HEMCvsTNBC_10kb_genova,shape ="cornerpeak")
+quantifyATA_HEMCvsTNBC_10kb_genova_checker <- quantify(ATA_HEMCvsTNBC_10kb_genova,shape ="checker")
+
+#下面可视化的时候照例还是用diff的数据而不是使用foldchange的数据，实际上可以发现各种方法定量化之后的ATA分析的结果数据都是一致的 
+ggbetweenstats(data=quantifyATA_HEMCvsTNBC_10kb_genova$per_TAD,  # 21,444
+               x=sample,
+               y=difference,
+               results.subtitle = FALSE,
+               pairwise.display="all")
+ggsave("10kb_HMECvsTNBC_ATA_default.pdf",height=7,width = 7)
+ggbetweenstats(data=quantifyATA_HEMCvsTNBC_10kb_genova_insulation$per_TAD, #21,444 
+               x=sample,
+               y=difference,
+               results.subtitle = FALSE,
+               pairwise.display="all")
+ggsave("10kb_HMECvsTNBC_ATA_insulation.pdf",height=7,width = 7) 
+ggbetweenstats(data=quantifyATA_HEMCvsTNBC_10kb_genova_cornerpeak$per_TAD, #21,444
+               x=sample,
+               y=difference,
+               results.subtitle = FALSE,
+               pairwise.display="all")
+ggsave("10kb_HMECvsTNBC_ATA_cornerpeak.pdf",height=7,width = 7)
+ggbetweenstats(data=quantifyATA_HEMCvsTNBC_10kb_genova_checker$per_TAD, #21,444
+               x=sample,
+               y=difference,
+               results.subtitle = FALSE,
+               pairwise.display="all")
+ggsave("10kb_HMECvsTNBC_ATA_checker.pdf",height=7,width = 7) 
+
+
+
+#同样对于上面的定量化分析之有两个指标，一个是$per_sample，另外一个是$per_TAD
+#然后定量化分析的话就$per_TAD数据使用，同样是两个指标，一个是foldchange，以及difference
+p <- ggbetweenstats(data=quantifyATA_HEMCvsTNBC_10kb_genova$per_TAD,
+               x=sample,
+               y=difference,
+               results.subtitle = FALSE,
+               pairwise.display="all")
+# scale_y_continuous(limits = c(-10, 25))
+ggsave("10kb_HMECvsTNBC_ATA_diff_gg.pdf",p,height=7,width = 7)
+
+p <- ggbetweenstats(data=quantifyATA_HEMCvsTNBC_10kb$per_TAD,
+               x=sample,
+               y=difference,
+               results.subtitle = FALSE,
+               pairwise.display="all")
+# scale_y_continuous(limits = c(-10, 25))
+ggsave("10kb_HMECvsTNBC_ATA_diff_hicexplorer_gg.pdf",p,height=7,width = 7)
+
+
+
+```
+
+#继续使用GENOVA中的ATA分析结果quantifyATA_HEMCvsTNBC_10kb_genova以及ATA_HEMCvsTNBC_10kb_genova
+ATA_HEMCvsTNBC_10kb_genova$signal是主要使用的数据
+```{r}
+library(data.table)
+library(ggplot2)
+
+# Melt array
+df <- data.table(
+  x = as.vector(slice.index(ATA_HEMCvsTNBC_10kb_genova$signal, 1)),
+  y = as.vector(slice.index(ATA_HEMCvsTNBC_10kb_genova$signal, 2)),
+  sample = as.vector(slice.index(ATA_HEMCvsTNBC_10kb_genova$signal, 3)),
+  value = as.vector(ATA_HEMCvsTNBC_10kb_genova$signal)
+)
+# Calculate distance (unit is arbitrary due to ATA)
+df[, dist := x - y]
+# Take averages per off-diagonal band
+df <- df[, list(value = mean(value)), by = c("dist", "sample")]
+# Split by sample
+df <- split(df, df$sample)
+
+# Adjust sample 2 a bit so that a difference will show
+# Don't do this with real data!
+df[[2]][, value := sqrt(value)]
+# Recombine the two samples, if you have more, this needs to be repeated for all samples
+df <- df[[1]][df[[2]], on = c("dist")]
+# Convert distance to TAD units
+df[, dist := scales::rescale(dist, to = c(-2, 2))]
+
+# Plot stuff
+ggplot(df, aes(dist, value / i.value)) +
+  geom_line(aes(colour = sample))
+
+
+```
+
+#TAD+N:Intra and inter TAD contacts
+TAD+N分析计算TADs及其1,2，N个邻居…之间的相互作用密度。这可以用来比较两个样本中的tad与邻近tad之间的相互作用是否不同。
+同理，还是使用40kb+20kb+10kb的数据来展示
+Calculate the coverage over TADs and between a TAD and its neighbours.
+应该使用的还是TAD domian的bed数据
+
+```{r fig.height=12}
+#40kb数据，同样是先GENOVA，再hicexplore中的TAD的bed文件
+TAD_N_40kb_genova <- intra_inter_TAD(list("HMEC" = HMEC_40kb_cool,
+'BT549' = BT549_40kb_cool,'HCC70' = HCC70_40kb_cool,'MB231' = MB231_40kb_cool),
+tad_bed = TADcalls_40kb$HMEC,
+max_neighbour = 10)
+visualise(TAD_N_40kb_genova, geom = 'jitter')
+ggsave("40kb_HMECvsTNBC_TAD+N_jitter_genova.pdf",height=7,width = 7)
+visualise(TAD_N_40kb_genova, geom = 'violin')
+ggsave("40kb_HMECvsTNBC_TAD+N_violin_genova.pdf",height=7,width = 7)
+visualise(TAD_N_40kb_genova, geom = 'boxplot')
+ggsave("40kb_HMECvsTNBC_TAD+N_boxplot_genova.pdf",height=7,width = 7)
+
+#尝试进行定量化分析：
+quantifyTAD_N_40kb_genova <- quantify(TAD_N_40kb_genova)
+
+
+#选用hicexplorer的
+bed_file_HMEC_40kb <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_HMEC_domains.bed"
+bed_df_HMEC_40kb <- read.table(bed_file_HMEC_40kb , header = FALSE, stringsAsFactors = FALSE)
+colnames(bed_df_HMEC_40kb) <- c("Chromosome", "Start", "End")
+TAD_N_40kb <- intra_inter_TAD(list("HMEC" = HMEC_40kb_cool,
+'BT549' = BT549_40kb_cool,'HCC70' = HCC70_40kb_cool,'MB231' = MB231_40kb_cool),
+tad_bed = bed_df_HMEC_40kb[,1:3],
+max_neighbour = 10)
+visualise(TAD_N_40kb, geom = 'jitter')
+ggsave("40kb_HMECvsTNBC_TAD+N_jitter_hicexplorer.pdf",height=7,width = 7)
+visualise(TAD_N_40kb, geom = 'violin')
+ggsave("40kb_HMECvsTNBC_TAD+N_violin_hicexplorer.pdf",height=7,width = 7)
+visualise(TAD_N_40kb, geom = 'boxplot')
+ggsave("40kb_HMECvsTNBC_TAD+N_boxplot_hicexplorer.pdf",height=7,width = 7)
+
+
+
+
+#下面是20kb的
+TAD_N_20kb_genova <- intra_inter_TAD(list("HMEC" = HMEC_20kb_cool,
+'BT549' = BT549_20kb_cool,'HCC70' = HCC70_20kb_cool,'MB231' = MB231_20kb_cool),
+tad_bed = TADcalls_20kb$HMEC,
+max_neighbour = 10)
+visualise(TAD_N_20kb_genova, geom = 'jitter')
+ggsave("20kb_HMECvsTNBC_TAD+N_jitter_genova.pdf",height=7,width = 7)
+visualise(TAD_N_20kb_genova, geom = 'violin')
+ggsave("20kb_HMECvsTNBC_TAD+N_violin_genova.pdf",height=7,width = 7)
+visualise(TAD_N_20kb_genova, geom = 'boxplot')
+ggsave("20kb_HMECvsTNBC_TAD+N_boxplot_genova.pdf",height=7,width = 7)
+
+
+#选用hicexplorer的
+bed_file_HMEC_20kb <-"/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/20000_HMEC_domains.bed"
+bed_df_HMEC_20kb <- read.table(bed_file_HMEC_20kb , header = FALSE, stringsAsFactors = FALSE)
+colnames(bed_df_HMEC_20kb) <- c("Chromosome", "Start", "End")
+TAD_N_20kb <- intra_inter_TAD(list("HMEC" = HMEC_20kb_cool,
+'BT549' = BT549_20kb_cool,'HCC70' = HCC70_20kb_cool,'MB231' = MB231_20kb_cool),
+tad_bed = bed_df_HMEC_20kb[,1:3],
+max_neighbour = 10)
+visualise(TAD_N_20kb, geom = 'jitter')
+ggsave("20kb_HMECvsTNBC_TAD+N_jitter_hicexplorer.pdf",height=7,width = 7)
+visualise(TAD_N_20kb, geom = 'violin')
+ggsave("20kb_HMECvsTNBC_TAD+N_violin_hicexplorer.pdf",height=7,width = 7)
+visualise(TAD_N_20kb, geom = 'boxplot')
+ggsave("20kb_HMECvsTNBC_TAD+N_boxplot_hicexplorer.pdf",height=7,width = 7)
+
+
+
+#下面是10kb的
+TAD_N_10kb_genova <- intra_inter_TAD(list("HMEC" = HMEC_10kb_cool,
+'BT549' = BT549_10kb_cool,'HCC70' = HCC70_10kb_cool,'MB231' = MB231_10kb_cool),
+tad_bed = TADcalls_10kb$HMEC,
+max_neighbour = 10)
+visualise(TAD_N_10kb_genova, geom = 'jitter')
+ggsave("10kb_HMECvsTNBC_TAD+N_jitter_genova.pdf",height=7,width = 7)
+visualise(TAD_N_10kb_genova, geom = 'violin')
+ggsave("10kb_HMECvsTNBC_TAD+N_violin_genova.pdf",height=7,width = 7)
+visualise(TAD_N_10kb_genova, geom = 'boxplot')
+ggsave("10kb_HMECvsTNBC_TAD+N_boxplot_genova.pdf",height=7,width = 7)
+
+
+#选用hicexplorer的
+bed_file_HMEC_10kb <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/10000_HMEC_domains.bed"
+bed_df_HMEC_10kb <- read.table(bed_file_HMEC_10kb , header = FALSE, stringsAsFactors = FALSE)
+colnames(bed_df_HMEC_10kb) <- c("Chromosome", "Start", "End")
+TAD_N_10kb <- intra_inter_TAD(list("HMEC" = HMEC_10kb_cool,
+'BT549' = BT549_10kb_cool,'HCC70' = HCC70_10kb_cool,'MB231' = MB231_10kb_cool),
+tad_bed = bed_df_HMEC_10kb[,1:3],
+max_neighbour = 10)
+visualise(TAD_N_10kb, geom = 'jitter')
+ggsave("10kb_HMECvsTNBC_TAD+N_jitter_hicexplorer.pdf",height=7,width = 7)
+visualise(TAD_N_10kb, geom = 'violin')
+ggsave("10kb_HMECvsTNBC_TAD+N_violin_hicexplorer.pdf",height=7,width = 7)
+visualise(TAD_N_10kb, geom = 'boxplot')
+ggsave("10kb_HMECvsTNBC_TAD+N_boxplot_hicexplorer.pdf",height=7,width = 7)
+```
+
+
+#下面就是loop相关的分析：建议使用20kb+10kb的数据
+APA分析
+这里使用的应该是完整的数据，而不是mustache中区分的common，unique，即all
+下面使用的是1 vs 3,实际分析可以选择1 vs 1，选用BT549
+```{r fig.height=12}
+#下面是10kb的
+#拓展loop分析
+HMEC_bedpe_file <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/loops_HMEC_all_10000.bedpe"
+HMEC_bedpe <- read.table(HMEC_bedpe_file , header = TRUE, stringsAsFactors = FALSE, sep = "\t")
+
+HMEC_Loops_extended = anchors_extendedloops(HMEC_10kb_cool$IDX,
+res = resolution(HMEC_10kb_cool),
+bedpe = HMEC_bedpe)
+
+APA_TNBC <- APA(list("HMEC" = HMEC_10kb_cool,
+'BT549' = BT549_10kb_cool,'HCC70' = HCC70_10kb_cool,'MB231' = MB231_10kb_cool),
+bedpe = HMEC_bedpe)
+APA_TNBC_extended <- APA(list("HMEC" = HMEC_10kb_cool,
+'BT549' = BT549_10kb_cool,'HCC70' = HCC70_10kb_cool,'MB231' = MB231_10kb_cool),
+anchors=HMEC_Loops_extended)
+
+visualise(APA_TNBC,
+colour_lim = c(0, 40), # set the colour limits of the upper row
+colour_lim_contrast = c(-5, 5),
+metric = "diff",
+contrast = 1) 
+ggsave("10kb_HMECvsTNBC_APA.pdf",height=7,width = 7)
+ 
+visualise(APA_TNBC_extended ,
+colour_lim = c(0, 3), # set the colour limits of the upper row
+colour_lim_contrast = c(-1, 1), 
+metric = "diff", 
+contrast = 1)
+ggsave("10kb_HMECvsTNBC_APA_extended.pdf",height=7,width = 7)
+
+
+#上面使用的都是all中的loop的bedPE的数据，可以在后面使用unique以及common的数据
+#然后这里使用的是genova中的APA分析功能，能够直接从上游文件中获取TNBC 3合1的效果，至于在juicer上需要在上游上处理3合1的效果
+
+```
+
+
+#下面就是对APA分析的结果定量化，可以将数据提取出来绘制箱线图等等，前面的分析也能够做
+按理说前面的saddle，ATA之类的都能够做
+按照最前面的配色，
+HMEC:RED
+BT549:GREEN
+HCC70:BLUE
+MB231:PURPLE
+最终显示顺序上是BT549 HCC70 HMEC MB231
+至于extend loop的数据暂时不处理
+```{r}
+#按照上面同理，还是定量化原始loop以及extend loop
+quantifyAPA_TNBC_out <- quantify(APA_TNBC)
+quantifyAPA_TNBC_extended <- quantify(APA_TNBC_extended)
+
+#定量化之后会有两个值，一个是$per_sample，就是所有loop的统计值，没多少信息，
+#另外一个是$per_loop，统计信息之多可以用于绘制很多图，后者中有意义的数值只有2列，foldchange以及difference,这两个数据可以提取出来绘图
+# plot boxplot with base-R (ggplot2 would be also easy),使用foldchange
+boxplot(split(quantifyAPA_TNBC_out$per_loop$foldchange,
+f = quantifyAPA_TNBC_out$per_loop$sample),
+col = c("green", 'blue',"red","purple"), outline = F,
+ylab = 'pixel enrichment loops')
+#ggsave("10kb_HMECvsTNBC_APA_FC_boxplot.pdf",height=7,width = 7)
+
+boxplot(split(quantifyAPA_TNBC_out$per_loop$difference,
+f = quantifyAPA_TNBC_out$per_loop$sample),
+col = c("green", 'blue',"red","purple"), outline = F,
+ylab = 'pixel enrichment loops')
+#ggsave("10kb_HMECvsTNBC_APA_diff_boxplot.pdf",height=7,width = 7)
+
+#下面是对extend loop的分析
+boxplot(split(quantifyAPA_TNBC_extended$per_loop$foldchange,
+f = quantifyAPA_TNBC_extended$per_loop$sample),
+col = c("green", 'blue',"red","purple"), outline = F,
+ylab = 'pixel enrichment loops')
+#ggsave("10kb_HMECvsTNBC_APA_extend_FC_boxplot.pdf",height=7,width = 7) boxplot都另存
+
+boxplot(split(quantifyAPA_TNBC_extended$per_loop$difference,
+f = quantifyAPA_TNBC_extended$per_loop$sample),
+col = c("green", 'blue',"red","purple"), outline = F,
+ylab = 'pixel enrichment loops')
+#ggsave("10kb_HMECvsTNBC_APA_extend_diff_boxplot.pdf",height=7,width = 7) 
+
+
+
+#或者使用ggplot，到时候将p检验传递进去
+p <- ggplot(quantifyAPA_TNBC_out$per_loop, aes(x = sample, y = foldchange, fill = sample)) +
+  geom_boxplot() +
+  labs(y = "pixel enrichment loops") +
+  scale_fill_manual(values = c("green", 'blue',"red","purple")) +  # 设置颜色
+  theme_minimal()+
+  ylim(0, 20)
+
+
+
+#foldchange以及difference列有inf问题
+na_count <- sum(is.na(quantifyAPA_TNBC_out$difference) | is.na(quantifyAPA_TNBC_out$foldchange)) #0
+inf_count <- sum(is.infinite(quantifyAPA_TNBC_out$difference) | is.infinite(quantifyAPA_TNBC_out$foldchange)) #0
+p <- ggbetweenstats(data=quantifyAPA_TNBC_out$per_loop,
+               x=sample,
+               y=difference,
+               results.subtitle = FALSE,
+               pairwise.display="all")
+ # +scale_y_continuous(limits = c(-5, 50))
+ggsave("10kb_HMECvsTNBC_APA_diff_gg.pdf",p,height=7,width = 7)
+
+
+#fc暂时绘制不出来
+p1 <- ggbetweenstats(data=quantifyAPA_TNBC_out$per_loop,
+               x=sample,
+               y=foldchange,
+               results.subtitle = TRUE,
+               pairwise.display="all")
+ # +scale_y_continuous(limits = c(-5, 50))
+ggsave("10kb_HMECvsTNBC_APA_FC_gg.pdf",p1,height=7,width = 7)
+
+
+
+
+```
+
+#其实上面的统计检验p值可以参考下面的进行，仅做参考
+```{r}
+compared <- tidyr::spread(unique(CSS[,-c(3,4)]), key = 'exp', value = 'strength')
+# Compare compartmentalization strength
+print(paste("Mean compartment strength in HMEC:", mean(compared$HMEC))) #3.4102007935837
+print(paste("Mean compartment strength in BT549:", mean(compared$BT549))) #1.65687130721445
+print(paste("Mean compartment strength in HCC70:", mean(compared$HCC70))) #3.25543165659022
+print(paste("Mean compartment strength in MB231:", mean(compared$MB231))) #3.10574258430639
+#这里最好是分开来分析不同类型细胞系的区室，不要3个直接合并之后取mean，因为有的区室强度是比HMEC大，有的是小
+#分情况而言，实际是不一致的，所以不能够直接合并对应的TNBC的数据并取mean
+#即不建议print(paste("Mean compartment strength in TNBC:", mean(c(compared$HCC70,compared$MB231,compared$BT549))))
+print(paste("T-test for HMEC vs BT549:", t.test(compared$HMEC, compared$BT549)$p.value %>% formatC(., format = "e", digits = 5))) #4.75127e-04
+print(paste("T-test for HMEC vs HCC70:", t.test(compared$HMEC, compared$HCC70)$p.value %>% formatC(., format = "e", digits = 5))) #7.92099e-01
+print(paste("T-test for HMEC vs MB231:", t.test(compared$HMEC, compared$MB231)$p.value %>% formatC(., format = "e", digits = 5))) #5.31807e-01
+#从这里可以看出其实BT549区室差异最大，所以挑选这个分析表征，当然可能是异质性区别太大了，如果是探究共性的话其实是可以直接从其他2个细胞系中获取推论
+
+#下面的小提琴+箱线图展示，实际上就是前面的异常区域排除的前置步骤-可视化，只不过多加了显著检验
+#对于下面图片的处理：1vs3 CSS展示图片为核心（但是设置字幕为false，即不显示计算公式），因为此处比较的算法+p值域前面t检验两两之间差异较大，想必不应该采用
+#其他3个1vs1 CSS对象中字幕设置为true，因为检验p值在公式字幕上，但没有1vs3的bar显示，但是p值与上面t值相接近
+#所以1vs3 CSS图片为核心，将3个1vs1的p值修改到该图片中；同时保存后面3张图片
+ggbetweenstats(data=CSS,
+                x=exp,
+                y=strength,
+               results.subtitle = FALSE,
+               pairwise.display="all",
+                title = "Distribution of compartment strength across HMEC vs TNBC")
+ggsave("500kb_HMEC_vs_TNBC_compartment_strength_Distribution.pdf", width = 7, height = 7)
+
+```
+
+#下面分析用于SE分析
+SE文件获取来自ROSE或者是CRCmapper，当然按照GENOVA中的官方文档可以使用来自homer call出来的SE  
+主要是PE-SCAn，建议是使用20-40kb左右的数据
+
+但是与homer的数据格式有点差异,实际上只要使用chr——起止位置，即bed格式数据即可
+
+
+基本上GENOVA中的操作都是一样，先使用特殊函数进行discovery，
+然后对该对象进行quantify，然后分析结果的数据结构，可以进行数据分析+绘图检验等
+最后一并进行可视化分析+搭配不同track的bed文件等
+the enrichment of interaction-frequency of all pairwise
+combinations of given regions
+#主要就是思考什么样的区域是适合最后在intra内部进行互作富集分析的，
+可以提供的区域的bed文件有很多，
+除了SE以及all的E的元件的bed文件之外
+```{r}
+HMEC_SE<- read.delim("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/HMEC_H3K27ac_peaks_SuperStitched.table.txt",
+header = TRUE,
+comment.char = "#")
+HMEC_allE <- read.delim("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/HMEC_H3K27ac_peaks_AllStitched.table.txt",
+header = TRUE,
+comment.char = "#")
+
+#下面就是SE以及全部的E元件的discovery的绘制以及分析
+TNBC_SE_OUT <- PESCAn(list(HMEC_40kb_cool,BT549_40kb_cool,HCC70_40kb_cool,MB231_40kb_cool), bed = HMEC_SE[,2:4])
+visualise(TNBC_SE_OUT)  
+ggsave("40kb_HMECvsTNBC_PESCAn_HMECse.pdf",height=7,width = 7)
+
+#下面的E区域太大了，再加上去有其他的报错，就暂时不处理E区域，看其他的intra的1个feature
+TNBC_allE_OUT <- PESCAn(list(HMEC_40kb_cool,BT549_40kb_cool,HCC70_40kb_cool,MB231_40kb_cool), bed = HMEC_allE[,2:4])
+visualise(TNBC_allE_OUT)
+ggsave("40kb_HMECvsTNBC_PESCAn_HMECalle.pdf",height=7,width = 7)
+
+
+#像前面处理那样进行定量化 
+quantifyTNBC_SE_OUT <- quantify(TNBC_SE_OUT)
+quantifyTNBC_allE_OUT <- quantify(TNBC_allE_OUT)
+
+#主要就是PESCAn之类的定量化之后的分析主要是集中在绘制箱线图+小提琴图，或者使用gg高级包将两者统一，建议是主要绘制普通的diff的箱线图+gg绘制的diff的2合1的p检验的图 
+#$per_sample，$per_interaction两个结构，然后就是定量化分析的话使用diff而不是foldchange的指标
+boxplot(split(quantifyTNBC_SE_OUT$per_interaction$difference,
+f = quantifyTNBC_SE_OUT$per_interaction$sample),
+col = c("green", 'blue',"red","purple"), outline = F,
+ylab = 'pairwise combinations of SE nrichment ')
+#ggsave("40kb_HMECvsTNBC_PESCAn_HMECse_diff_boxplot.pdf",height=7,width = 7)
+
+boxplot(split(quantifyTNBC_allE_OUT$per_interaction$difference,
+f = quantifyTNBC_allE_OUT$per_interaction$sample), 
+col = c("green", 'blue',"red","purple"), outline = F,
+ylab = 'pairwise combinations of E nrichment ')
+#ggsave("40kb_HMECvsTNBC_PESCAn_HMECalle_diff_boxplot.pdf",height=7,width = 7)
+ 
+ 
+
+p <- ggbetweenstats(data=quantifyTNBC_SE_OUT$per_interaction,
+               x=sample,
+               y=difference,
+               results.subtitle = FALSE,
+               pairwise.display="all")
+# scale_y_continuous(limits = c(-10, 25))
+ggsave("40kb_HMECvsTNBC_PESCAn_HMECse_diff_gg.pdf",p,height=7,width = 7)
+summary(quantifyTNBC_SE_OUT$per_interaction$difference) 
+#Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#-12.692   0.000   0.000   0.174   0.000 129.357
+#依据效果好坏设置成y轴范围，最后还是要依据效果进行修改，但是p检验那个还是要最后自己手动修图添加
+p <- ggbetweenstats(data=quantifyTNBC_SE_OUT$per_interaction,
+               x=sample,
+               y=difference,
+               results.subtitle = FALSE,
+               pairwise.display="all")+
+ scale_y_continuous(limits = c(-10, 25))
+ggsave("40kb_HMECvsTNBC_PESCAn_HMECse_diff_gg_2.pdf",p,height=7,width = 7)
+
+p <- ggbetweenstats(data=quantifyTNBC_SE_OUT$per_interaction,
+               x=sample,
+               y=difference,
+               results.subtitle = TRUE,
+               pairwise.display="all")+
+ scale_y_continuous(limits = c(-10, 10))
+ggsave("40kb_HMECvsTNBC_PESCAn_HMECse_diff_gg_3.pdf",p,height=7,width = 7)
+
+```
+
+
+```{r}
+RES = 40e3
+persp(TNBC_SE_OUT, border = NA,
+cex.axis = 0.6, cex.lab = 0.6)
+
+persp(TNBC_SE_OUT)
+
+dim(TNBC_SE_OUT)[3]
+
+TNBC_SE_OUT$signal
+```
+
+#下面是使用C-SCAn函数对两组区域，两个bed文件之间的互作富集分析，比如说是EPC，或者说是SE-P-C
+下面获取的默认启动子promoter
+以及默认的gene body文件genebody
+
+
+```{r}
+BiocManager::install("ChIPseeker")
+library("ChIPseeker")
+library("TxDb.Hsapiens.UCSC.hg19.knownGene")
+#首先是获取启动子区域的bed文件
+txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
+#做生信分析时，一般选择上游1 kb，下游 500 nt，也有选上下游各1 kb的
+promoter <- getPromoters(TxDb=txdb, upstream=1000, downstream=1000)
+promoter2 <- getPromoters(TxDb=txdb, upstream=1000, downstream=500)
+#处理启动子区域，还可以获得gene body区域，这里的body区域除了使用chipseeker获取之外，还可以直接从gtf等ucsc中基因组文件获取
+genebody <- getBioRegion(TxDb = txdb,
+                         by = "gene",
+                         type = "body")
+#但是上面的都是grange对象，需要转换为bed格式
+library(rtracklayer)
+export.bed(promoter, con = 'hg19_promoter.bed') #但是没有gene id对应
+export.bed(promoter2, con = 'hg19_promoter2.bed')
+export.bed(genebody, con = 'hg19_genebody.bed')
+
+
+#或者使用loop中00脚本来处理toBED格式，类似于
+promoter <- data.frame(seqnames=seqnames(promoter),
+  start=start(promoter),
+  end=end(promoter),
+      strand=strand(promoter))
+write.table(promoter, file="hg19_promoter.bed", quote=F, sep="\t", row.names=F, col.names=F)
+
+promoter2 <- data.frame(seqnames=seqnames(promoter2),
+  start=start(promoter2),
+  end=end(promoter2),
+      strand=strand(promoter2))
+write.table(promoter2, file="hg19_promoter2.bed", quote=F, sep="\t", row.names=F, col.names=F)
+    
+genebody <- data.frame(seqnames=seqnames(genebody),
+  start=start(genebody),
+  end=end(genebody),
+      strand=strand(genebody),
+gene=elementMetadata(genebody)$gene_id)
+write.table(genebody, file="hg19_genebody.bed", quote=F, sep="\t", row.names=F, col.names=F)
+
+#统一一下格式，在后续使用时候可以统一，CSCAn
+promoter$seqnames <- as.character(promoter$seqnames)
+#获取HMEC的SE以及E，后期可以使用其他的E或者SE
+HMEC_SE<- read.delim("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/HMEC_H3K27ac_peaks_SuperStitched.table.txt",
+header = TRUE,
+comment.char = "#")
+HMEC_SE$seqnames
+HMEC_allE <- read.delim("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/HMEC_H3K27ac_peaks_AllStitched.table.txt",
+header = TRUE,
+comment.char = "#")
+
+
+#1，首先是EPC，应该使用HMEC中的E+refgene文件进行互作分析，首先E是细胞类型特异性的，然后gene应该是通用的，暂时没找到细胞类型特异性的EPC，但是CRC应该算是
+#那这里应该寻找refgene即gene的bed，还是P的bed？
+TNBC_SEPC_OUT <- CSCAn(list(HMEC_40kb_cool,BT549_40kb_cool,HCC70_40kb_cool,MB231_40kb_cool), bedlist = list(promoter[,1:3],HMEC_SE[,2:4]))
+visualise(TNBC_SEPC_OUT) #但是只有一幅图，要不要只在两者之间绘制，然后1vs1 X3
+tornado_aggregate(TNBC_SEPC_OUT)
+#上面1vs3实际上分析的时候最后只能出一幅图，所以下面可以设置成1vs1 x3
+BT549_SEPC_OUT <- CSCAn(list(HMEC_40kb_cool,BT549_40kb_cool), bedlist = list(promoter[,1:3],HMEC_SE[,2:4]))
+HCC70_SEPC_OUT <- CSCAn(list(HMEC_40kb_cool,HCC70_40kb_cool), bedlist = list(promoter[,1:3],HMEC_SE[,2:4]))
+MB231_SEPC_OUT <- CSCAn(list(HMEC_40kb_cool,MB231_40kb_cool), bedlist = list(promoter[,1:3],HMEC_SE[,2:4]))
+par(mfrow = c(1, 3))
+visualise(BT549_SEPC_OUT)
+visualise(HCC70_SEPC_OUT)
+visualise(MB231_SEPC_OUT)
+#或者是使用mprow函数
+
+TNBC_allEPC_OUT <- CSCAn(list(HMEC_40kb_cool,BT549_40kb_cool,HCC70_40kb_cool,MB231_40kb_cool), bedlist = list(promoter[,1:3],HMEC_SE[,2:4]))
+visualise(TNBC_allEPC_OUT) #但是只有一幅图，要不要只在两者之间绘制，然后1vs1 X3
+tornado_aggregate(TNBC_allEPC_OUT)
+
+#接着是定量化分析
+quantifyTNBC_SEPC_OUT <- quantify(TNBC_SEPC_OUT)
+quantifyTNBC_allEPC_OUT <- quantify(TNBC_allEPC_OUT)
+
+
+K27me3 <- read.delim('.H3K27me3',header=F)
+K27me1 <- read.delim('.H3K27me1',header=F)
+out <- CSCAn(WT,bedlist = list (K27me3,K27me1))
+visualise(out)
+
+
+#2，其次是CTCF的正反向的motif
+
+
+```
+
+
+#下面的分析是
+```{r}
+
+
+
+```
+
+
+#下面是用于获取CTCF的motif的bed文件，主要是用于loop分析
+1，尝试使用公共文献发表的数据，但是实际效果不是很好
+2，使用FIMO预测的motif，主要还是下面的数据
+https://dozmorovlab.github.io/CTCF/
+```{r fig.height=12}
+BiocManager::install("plyranges", update = FALSE)
+library(plyranges)
+
+suppressMessages(library(AnnotationHub))
+ah <- AnnotationHub()
+query_data <- subset(ah, preparerclass == "CTCF")
+query_data
+query_data$dataprovider %>% table()
+subset(query_data, species == "Homo sapiens" & 
+                   genome == "hg19" & 
+                   dataprovider == "JASPAR 2022")
+CTCF_hg19_all <- query_data[["AH104736"]] #这个数据提供者一共就只有2记录，现在使用的是第一个，第二个也可以使用
+CTCF_hg19_all <- CTCF_hg19_all %>% keepStandardChromosomes() %>% sort()
+
+write.table(CTCF_hg19_all %>% sort() %>% as.data.frame(), 
+            file = "CTCF_hg19_all.bed",
+            sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
+#这个文件还有很多冗余列，可以在shell中处理
+
+
+#在CTCF对应的motif的bed原始文件获取之后，即上面对应的文件CTCF_hg19_all文件之后，官方实际上还做了p值筛选的工作，毕竟原始文件上peak位点太多了
+# Check length before filtering
+print(paste("Number of CTCF motifs at the default 1e-4 threshold:", length(CTCF_hg19_all)))
+#> [1] "Number of CTCF motifs at the default 1e-4 threshold: 3035951"
+# Filter and check length after filtering
+CTCF_hg19_all_filtered <- CTCF_hg19_all %>% plyranges::filter(pvalue < 1e-6)
+print(paste("Number of CTCF motifs at the 1e-6 threshold:", length(CTCF_hg19_all_filtered)))
+#> [1] "Number of CTCF motifs at the 1e-6 threshold: 71825"
+
+# Proportion of overlapping enrtries
+tmp <- findOverlaps(CTCF_hg19_all, CTCF_hg19_all)
+prop_overlap <- sort(table(queryHits(tmp)) %>% table(), decreasing = TRUE)
+sum(prop_overlap[which(names(prop_overlap) != "1")]) / length(CTCF_hg19_all) #0.3732356
+#Reducing them (merging overlapping CTCF sites), combined with 1E-6 cutoff filtering
+print(paste("Number of CTCF_hg19_all motifs at the 1e-6 threshold AND reduced:", length(CTCF_hg19_all_filtered %>% reduce()))) #61940
+
+CTCF_hg19_all_filtered <- CTCF_hg19_all_filtered %>% reduce() 
+#之后就使用这个bed文件
+write.table(CTCF_hg19_all_filtered  %>% sort() %>% as.data.frame(), 
+            file = "CTCF_hg19_all_filter&reduce.bed",
+            sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
+
+```
+
+```{r fig.height=12}
+CTCF_hg19_all
+```
+
+
+
+
+
+
+
+
+
+#############从下面开始进行peak的注释
+chipseeker一般的注释，主要是loop的anchor文件，或TAD的边界文件等bed文件
+首先是获取HMEC vs TNBC中的anchor文件，注意要reduce之后的，然后这里先使用全部的anchor数据作为测试
+之后可以使用unique等anchor数据进行分析
+```{r fig.height=12}
+#统一规定：HMEC的数据使用TNBC文件夹中的，其他细胞系的数据使用各自文件夹中的
+HMEC_anchor_all = read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/anchors_HMEC_all_10000.bed",sep = "\t", skip = 1) 
+BT549_anchor_all = read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/anchors_BT549_all_10000.bed",sep = "\t", skip = 1) 
+HCC70_anchor_all = read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/anchors_HCC70_all_10000.bed",sep = "\t", skip = 1) 
+MB231_anchor_all = read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/anchors_MB231_all_10000.bed",sep = "\t", skip = 1) 
+TNBC_anchor_all = read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/anchors_TNBC_all_10000.bed",sep = "\t", skip = 1) 
+
+#然后是reduce
+GR_HMEC_anchor_all = GRanges(seqnames=HMEC_anchor_all$V1, 
+                      ranges= IRanges(start=HMEC_anchor_all$V2, end=HMEC_anchor_all$V3)) %>% GenomicRanges::reduce()
+GR_BT549_anchor_all = GRanges(seqnames=BT549_anchor_all$V1, 
+                      ranges= IRanges(start=BT549_anchor_all$V2, end=BT549_anchor_all$V3)) %>% GenomicRanges::reduce()
+GR_HCC70_anchor_all = GRanges(seqnames=HCC70_anchor_all$V1, 
+                      ranges= IRanges(start=HCC70_anchor_all$V2, end=HCC70_anchor_all$V3)) %>%  GenomicRanges::reduce()
+GR_MB231_anchor_all = GRanges(seqnames=MB231_anchor_all$V1, 
+                      ranges= IRanges(start=MB231_anchor_all$V2, end=MB231_anchor_all$V3)) %>%  GenomicRanges::reduce()
+GR_TNBC_anchor_all = GRanges(seqnames=TNBC_anchor_all$V1, 
+                      ranges= IRanges(start=TNBC_anchor_all$V2, end=TNBC_anchor_all$V3)) %>%  GenomicRanges::reduce()
+
+#然后就是如何使用reduce之后的数据，如何export出位bed文件，供下一次使用，看看能不能作为bed文件使用
+
+
+
+
+
+#加载包
+library(ChIPseeker)
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
+library(clusterProfiler)
+
+ggsave("10kb_HMEC_vs_TNBC_anchor_all_covplot.pdf",height = 15,width = 10)
+```
+
+
+#1，ChIP peaks coverage plot首先能够查看一下chr分布KR图,但是区域会重叠，建议使用1vs1的unqiue的bed文件进行比较，可以使用HMEC vs TNBC的
+```{r fig.height=12}
+covplot(GR_TNBC_anchor_all)   #但是这些仅仅只是bed文件，没有其他的信号，所以暂时无法使用相应的各种
+HMEC_vs_TNBC_anchor <- GRangesList(HMEC=GR_HMEC_anchor_all,BT549=GR_BT549_anchor_all,HCC70=GR_HCC70_anchor_all,MB231=GR_MB231_anchor_all)
+covplot(HMEC_vs_TNBC_anchor)
+```
+
+
+#2,然后就是获取各种基因组区域文件
+```{r fig.height=12}
+#启动子定位为上下游1kb
+promoter <- getPromoters(TxDb=txdb, upstream=1000, downstream=1000)
+tagMatrix <- getTagMatrix(HMEC_vs_TNBC_anchor, windows=promoter)
+tagHeatmap(tagMatrix)
+
+
+#或使用，HMEC_vs_TNBC_anchor暂时无法使用list对象，还是一个一个来分析
+peakHeatmap(GR_HMEC_anchor_all, TxDb=txdb, upstream=1000, downstream=1000)
+peakHeatmap(GR_BT549_anchor_all, TxDb=txdb, upstream=1000, downstream=1000)
+peakHeatmap(GR_HCC70_anchor_all, TxDb=txdb, upstream=1000, downstream=1000)
+peakHeatmap(GR_MB231_anchor_all, TxDb=txdb, upstream=1000, downstream=1000)
+peakHeatmap(GR_TNBC_anchor_all, TxDb=txdb, upstream=1000, downstream=1000)
+
+```
+
+#
+```{r fig.height=12}
+plotAvgProf2(files[[4]], TxDb=txdb, upstream=3000, downstream=3000,
+             xlab="Genomic Region (5'->3')", ylab = "Read Count Frequency")
+```
+
+
+#3,Peak Annotation
+```{r}
+peakAnnoHMEC <- annotatePeak(GR_HMEC_anchor_all, tssRegion=c(-1000, 1000),
+                         TxDb=txdb, annoDb="org.Hs.eg.db")
+peakAnnoBT549 <- annotatePeak(GR_BT549_anchor_all, tssRegion=c(-1000, 1000),
+                         TxDb=txdb, annoDb="org.Hs.eg.db")
+peakAnnoHCC70 <- annotatePeak(GR_HCC70_anchor_all, tssRegion=c(-1000, 1000),
+                         TxDb=txdb, annoDb="org.Hs.eg.db")
+peakAnnoMB231 <- annotatePeak(GR_MB231_anchor_all, tssRegion=c(-1000, 1000),
+                         TxDb=txdb, annoDb="org.Hs.eg.db")
+peakAnnoTNBC <- annotatePeak(GR_TNBC_anchor_all, tssRegion=c(-1000, 1000),
+                         TxDb=txdb, annoDb="org.Hs.eg.db")
+
+plotAnnoPie(peakAnnoHMEC)
+plotAnnoBar(peakAnnoHMEC)
+#install.packages("ggupset")
+library(ggupset)
+upsetplot(peakAnnoHMEC, vennpie=TRUE)
+
+
+plotDistToTSS(peakAnnoHMEC,
+              title="Distribution of transcription factor-binding loci\nrelative to TSS")
+```
+
+#Profile of several ChIP peak data binding to TSS region
+```{r}
+promoter <- getPromoters(TxDb=txdb, upstream=1000, downstream=1000)
+HMEC_vs_TNBC_anchor <- GRangesList(HMEC=GR_HMEC_anchor_all,BT549=GR_BT549_anchor_all,HCC70=GR_HCC70_anchor_all,MB231=GR_MB231_anchor_all)
+tagMatrixList <- lapply(HMEC_vs_TNBC_anchor, getTagMatrix, windows=promoter)
+#c(GR_HMEC_anchor_all,GR_BT549_anchor_all,GR_HCC70_anchor_all,GR_MB231_anchor_all,GR_TNBC_anchor_all)
+plotAvgProf(tagMatrixList, xlim=c(-1000, 1000))
+ggsave("10kb_HMEC_vs_TNBC_anchor_all_TSS1kb_profile.pdf",height = 7,width = 7)
+plotAvgProf(tagMatrixList, xlim=c(-1000, 1000), conf=0.95,resample=500, facet="row")
+ggsave("10kb_HMEC_vs_TNBC_anchor_all_TSS1kb_profile1.pdf",height = 7,width = 7)
+
+#下面的方法都无效，暂时行不通
+## normal method
+#plotPeakProf2(HMEC_vs_TNBC_anchor, upstream = 1000, downstream = 1000, conf = 0.95,
+#              by = "gene", type = "start_site", TxDb = txdb,
+#              facet = "row")
+#ggsave("10kb_HMEC_vs_TNBC_anchor_all_TSS1kb_profile2.pdf",height = 7,width = 7)
+## binning method 
+#plotPeakProf2(HMEC_vs_TNBC_anchor, upstream = 1000, downstream = 1000, conf = 0.95,
+#              by = "gene", type = "start_site", TxDb = txdb,
+#              facet = "row", nbin = 800)
+#ggsave("10kb_HMEC_vs_TNBC_anchor_all_TSS1kb_profile3.pdf",height = 7,width = 7)
+```
+#Peak heatmaps
+Profile of several ChIP peak data binding to body region
+```{r}
+tagHeatmap(tagMatrixList)
+ggsave("10kb_HMEC_vs_TNBC_anchor_all_TSS1kb_tagHeatmap.pdf",height = 7,width = 7)
+#plotPeakProf2(HMEC_vs_TNBC_anchor, upstream = rel(0.2), downstream = rel(0.2),
+#              conf = 0.95, by = "gene", type = "body",
+#              TxDb = txdb, facet = "row", nbin = 800)
+```
+
+#ChIP peak annotation comparision
+之后可以合并使用TNBC的数据
+```{r}
+peakAnnoList <- lapply(HMEC_vs_TNBC_anchor, annotatePeak, TxDb=txdb,
+                       tssRegion=c(-1000, 1000), verbose=FALSE)
+plotAnnoBar(peakAnnoList)
+ggsave("10kb_HMEC_vs_TNBC_anchor_all_TSS1kb_AnnoBar.pdf",height = 7,width = 7)
+#plotAnnoPie(peakAnnoList)
+#ggsave("10kb_HMEC_vs_TNBC_anchor_all_TSS1kb_AnnoPie.pdf",height = 7,width = 7)
+plotDistToTSS(peakAnnoList)
+ggsave("10kb_HMEC_vs_TNBC_anchor_all_TSS1kb_DistToTSS.pdf",height = 7,width = 7)
+
+#upsetplot(peakAnnoList, vennpie=TRUE)
+
+```
+
+
+#peak区域gene的功能富集分析
+```{r}
+genes = lapply(peakAnnoList, function(i) as.data.frame(i)$geneId)
+names(genes) = sub("_", "\n", names(genes))
+compKEGG <- compareCluster(geneCluster   = genes,
+                         fun           = "enrichKEGG",
+                         pvalueCutoff  = 0.05,
+                         pAdjustMethod = "BH")
+dotplot(compKEGG, showCategory = 15, title = "KEGG Pathway Enrichment Analysis")
+#barplot(compKEGG, showCategory = 15)
+```
+
+
+```{r}
+genes= lapply(peakAnnoList, function(i) as.data.frame(i)$geneId)
+vennplot(genes)
+```
+
+
+#######然后是对TAD边界的peak/bed的注释
+暂时使用40kb的数据
+```{r}
+HMEC_TADboundary = read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_HMEC_boundaries.bed",sep = "\t") 
+BT549_TADboundary = read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_BT549_boundaries.bed",sep = "\t") 
+HCC70_TADboundary = read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_HCC70_boundaries.bed",sep = "\t") 
+MB231_TADboundary = read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_MB231_boundaries.bed",sep = "\t") 
+
+#然后是转换为gr对象，同样对边界进行reduce
+GR_HMEC_TADboundary = GRanges(seqnames=HMEC_TADboundary$V1, 
+                      ranges= IRanges(start=HMEC_TADboundary$V2, end=HMEC_TADboundary$V3)) %>% GenomicRanges::reduce()
+GR_BT549_TADboundary = GRanges(seqnames=BT549_TADboundary$V1, 
+                      ranges= IRanges(start=BT549_TADboundary$V2, end=BT549_TADboundary$V3)) %>% GenomicRanges::reduce()
+GR_HCC70_TADboundary = GRanges(seqnames=HCC70_TADboundary$V1, 
+                      ranges= IRanges(start=HCC70_TADboundary$V2, end=HCC70_TADboundary$V3)) %>% GenomicRanges::reduce()
+GR_MB231_TADboundary = GRanges(seqnames=MB231_TADboundary$V1, 
+                      ranges= IRanges(start=MB231_TADboundary$V2, end=MB231_TADboundary$V3)) %>% GenomicRanges::reduce()
+
+HMEC_vs_TNBC_TADboundary <- GRangesList(HMEC=GR_HMEC_TADboundary,BT549=GR_BT549_TADboundary,HCC70=GR_HCC70_TADboundary,MB231=GR_MB231_TADboundary)
+
+covplot(HMEC_vs_TNBC_TADboundary)
+ggsave("40kb_HMEC_vs_TNBC_TADboundary_covplot.pdf",height = 15,width = 10)
+
+
+peakAnnoList <- lapply(HMEC_vs_TNBC_TADboundary, annotatePeak, TxDb=txdb,
+                       tssRegion=c(-1000, 1000), verbose=FALSE)
+plotAnnoBar(peakAnnoList)
+ggsave("40kb_HMEC_vs_TNBC_TADboundary_TSS1kb_AnnoBar.pdf",height = 7,width = 7)
+plotDistToTSS(peakAnnoList)
+ggsave("40kb_HMEC_vs_TNBC_TADboundary_TSS1kb_DistToTSS.pdf",height = 7,width = 7)
+genes = lapply(peakAnnoList, function(i) as.data.frame(i)$geneId)
+names(genes) = sub("_", "\n", names(genes))
+compKEGG <- compareCluster(geneCluster   = genes,
+                         fun           = "enrichKEGG",
+                         pvalueCutoff  = 0.05,
+                         pAdjustMethod = "BH")
+dotplot(compKEGG, showCategory = 15, title = "KEGG Pathway Enrichment Analysis")
+ggsave("40kb_HMEC_vs_TNBC_TADboundary_KEGG.pdf",height = 10,width = 7)
+```
+
+
+```{r}
+# 导入readr包
+library(readr)
+
+# 读取BED文件
+bed_data <- read.delim("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_HMEC_domains.bed", header = FALSE)
+# 将BED文件写入TSV文件
+write_tsv(bed_data, "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_HMEC_domains.tsv")
+bed_data <- read.delim("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_MB231_domains.bed", header = FALSE)
+# 将BED文件写入TSV文件
+write_tsv(bed_data, "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script4/merge_fq/40000_MB231_domains.tsv")
+
+
+
+
+```
+
+
+####还是对peak的注释，使用ggchipvis
+```{r}
+# install.packages("devtools")
+devtools::install_github("junjunlab/ggChIPvis")
+# or
+#remotes::install_github("junjunlab/ggChIPvis")
+
+library(ggChIPvis)
+
+
+
+
+```
+
+
+##########下面是对TAD以及loop与转录协同的分析，使用R包inTAD,首先是读取enhancer全部文件
+```{r}
+#BiocManager::install("InTAD")
+library(InTAD)
+
+#all E
+HMEC_allE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/HMEC_allE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+TNBC_allE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/TNBC_allE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+BT549_allE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/BT549_allE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+HCC70_allE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/HCC70_allE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+MB231_allE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/MB231_allE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+
+
+#TE
+HMEC_TE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/HMEC_TE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+TNBC_TE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/TNBC_TE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+BT549_TE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/BT549_TE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+HCC70_TE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/HCC70_TE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+MB231_TE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/MB231_TE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+
+
+#SE
+HMEC_SE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/HMEC_SE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+TNBC_SE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/TNBC_SE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+BT549_SE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/BT549_SE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+HCC70_SE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/HCC70_SE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+MB231_SE <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/SE/enhancer/sortbed/MB231_SE_sort.bed", header = TRUE, stringsAsFactors = FALSE)
+```
+
+
+
+```{r}
+if (!require("devtools")) install.packages("devtools")
+devtools::install_github('przemol/seqplots', build_vignettes=FALSE)
+library(seqplots)
+run()
+```
