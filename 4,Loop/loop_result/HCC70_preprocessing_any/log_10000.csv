@@ -1,0 +1,22 @@
+Loops HMEC all count,16430
+Loops HCC70 all count,12631
+Loops HMEC unique count,9145
+Loops HCC70 unique count,5346
+Loops HMEC common count,7285
+Loops HCC70 common count,7285
+Loops HMEC all width,60000,330000,434152.77,1960000
+Loops HCC70 all width,50000,340000,444538.04,1970000
+Loops HMEC unique width,60000,360000,470929.47,1960000
+Loops HCC70 unique width,50000,410000,520505.05,1970000
+Loops HMEC common width,70000,300000,387986.27,1950000
+Loops HCC70 common width,70000,300000,388790.67,1950000
+HMEC all vs. HCC70 all width difference,7.78e-03
+HMEC unique vs. HCC70 unique width difference,2.87e-14
+HMEC unique vs. HMEC common width difference,5.33e-37
+HCC70 unique vs. HCC70 common width difference,1.61e-75
+Anchors HMEC all count,32860
+Anchors HCC70 all count,25262
+Anchors HMEC unique count,8843
+Anchors HCC70 unique count,4131
+Anchors HMEC common count,24017
+Anchors HCC70 common count,21131
