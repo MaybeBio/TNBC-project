@@ -1,5 +1,55 @@
 进行loop分析，同样使用1中的mcool文件，建议使用10kb及以下，本项目可以结合20kb数据，
 主要参考https://github.com/dozmorovlab/PDXHiC_supplemental/tree/main/Fig6_HiC_Loops、Fig7_HiC_Enrichments、00_preprocessing.Rmd
+一些日志文件见文件夹log/
 1，loop结构识别：使用工具mustache
-见脚本loop_call.sh
+（1）mustache处理：见脚本loop_call.sh
+mustache有diff参数，能够直接做差异loop分析，但是PDX原始脚本中没有使用diff功能，所以还是单独样本识别loop结构
+（2）样本合并的问题：
+分析mustache输出loop的tsv文件格式，两个anchor
+①anchor的bed数据合并，就是从基因组位点上进行bedtools intersect等合并，但是loop tsv文件其他列的数据如何修改，对其取均值？
+②另外一种策略就是loop合并比较麻烦，要anchor两边交集，可以保留loop数据，下游分析取出单边的anchor数据然后进行交集合并等
+本项目因为数据量的问题，1vs3，暂时保留TNBC 3类loop数据，不合并为TNBC
+（3）分析识别common共有以及unique/specific特异的loop以及anchor：见脚本00_preprocessing.Rmd
+首先是anchor，使用bedtools或者chip-seq的下游交集分析工具（chipseeker等）来做交集分析，只要两个anchor位点有交集就作为common，否则为unique；
+1个loop2个anchor中只要有一个unique的anchor那就是unqiue的loop，两个都是common的anchor的才是common的loop。
+①对loop以及anchor数据的简单图示，条形图见脚本01_Anchor_Loop_Barplots.Rmd，loop尺寸比例统计见脚本03_Loop_Width.sh，
+②
 
+此处脚本处理的anchor以及loop数据，涉及到reduce&要符合生物学意义，所以数据处理上数目有出入，总之数据慎用！还是要再处理！
+（4）EPC识别：增强子-启动子识别
+在差异loop的基础上去注释两端的anchor，但是unqiue的anchor注释出来不一定是不同的元件，这里其实涉及到anchor尺寸与元件尺寸的问题，
+理论上来说一开始不应该分析差异loop，应该一开始注释anchor，然后根据anchor的注释来分析loop差异与否，也就是说，在差异loop分析上，我可以将没有overlap的loop注释为差异的loop，但是实际上很有可能这两个loop对应的anchor就在同一个EPC元件内，这里涉及到元件bed中id标识的问题；
+所以可以去看一下juicer以及mustache本身diff是怎么处理得出的loop是不是真正差异的——》实际上1(3)中差异loop的定义是PDX nature文献中定义的，因为没有使用工具本身的diff loop功能，所以才会有下游差异分析差异定义的问题，也涉及到元件注释，不清楚juicer、mustache本身diff功能做的是什么，可以之后试试！！！
+
+2，loop下游分析：
+（1）APA分析：
+可以使用juicer的APA分析模块，也可以使用mcool文件导入到GENOVA中处理；
+前者见脚本02_APA_Mustache.qsub，后期修改为APA.sh；
+后者见1 ABsaddle.Rmd（https://github.com/MaybeBio/seu-TNBC-project/blob/main/2%2CCompartment/ABsaddle.Rmd），2400行左右
+（2）TE/SE识别：
+因为要做EPC注释，所以要识别普通增强子以及超级增强子，所以要处理SE。
+SE识别分析流程见srtp项目，主要使用工具ROSE。
+分析的时候区分allE、TE、SE，每个样本分上述3个bed文件，并且排好序，只获取特定列（awk处理）；见脚本SE/sort.sh+TNBC_enhancer.sh+tobed.sh，其余文件见SE/文件夹
+（3）loop注释，主要是两端anchor注释，狭义即EPC注释
+思路上是：将loop拆分成左右anchor bed文件（注意要保留原来在同一行的loop id信息），然后分别进行注释，主要注释为启动子、TE/SE、other文件，增强子使用（2）中识别的bed文件，启动子还是使用clusterprofiler开发者的工具获取的启动子bed文件（自定义TSS上下游边界，使用chipseeker获取promoter的bed文件）——》然后左右anchor带着各自的注释信息合并回来原来的bedpe的loop文件，当然我们知道一个anchor可能注释成很多元件，所以左右anchor的bed注释数据必然会不一致，还原为loop时将带有同一loop id信息的anchor注释元件进行组合（anchor1：元件1,2,3等| anchor2：元件a，b，c等——》然后进行组合，将每个可能的注释组合都作为这个loop的注释，C31xC31等）。
+
+还可以做multi-hub分析，也就是看受E调控的gene数目，或者gene受E调控的数目多少——》找到受E调控多的gene；
+对收集到的gene，可以做富集分析，此处使用metascape，因为没有logFC等其他指标——》本项目中可以做富集分析的gene有很多，比如说差异loop中就可以直接注释gene，然后找差集做富集，但是最后本项目只对SE感兴趣，只对SE调控的gene做了富集分析。主要是将TNBC以及HMEC中受SE调控的gene（通过注释的bed+数据库，找到这个gene id，类似于compartment分析中的overlapp），然后分别有TNBC受SE调控的gene，以及HMEC受SE调控的gene
+
+EPC注释时总结收集过很多草稿脚本，不一定执行，见
+find_functional_loops.py+findloop.sh，
+以及anchor是bed文件，loop是bedpe文件（即2个bed坐标），所以也想过找bedpe文件处理的脚本，见BedpeAnnotateFromBed使用的EPC.sh以及EPC_2.sh
+（4）EPC分析衍生：类似APA/ATA，从聚集分析角度去分析两个感兴趣区域聚集互作热图，
+使用hicexplorer中的hicAggregateContacts，见hicAggregateContacts/文件夹，主要脚本见hicAggregateContacts/hicAggregateContact.sh，还有一个草稿hicAggregateContact_2.sh，但实际分析过程出图有问题，待处理。
+在GENOVA中见PESCAn、CSCAn，见官方vigenette指南等？
+
+
+见
+（4）CTCF motif方向问题：涉及到lab的topic
+见脚本04_CTCF_Orientation.sh，
+要准备hg19等配套基因组的CTCF的motif的bed文件，见PDX开发者的R包CTCF，或者去motif分析数据库下载相应数据（meme，jasper？等）；
+还涉及到loop的motif问题，实际上jucier也有loop motif分析，但是执行效果不好，见脚本juicer_loop_motif.sh，实际没有使用改脚本，待处理！
+
+另外还可以提取出motif方向相反的CTCF的bed文件做分析
+
+原本打算使用配套的CTCF  chip-seq数据，所以也有CTCF的处理过程，但是motif分析有问题，所以就没做下去！
