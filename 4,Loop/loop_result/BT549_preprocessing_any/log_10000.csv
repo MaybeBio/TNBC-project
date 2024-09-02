@@ -1,0 +1,22 @@
+Loops HMEC all count,16430
+Loops BT549 all count,11363
+Loops HMEC unique count,9062
+Loops BT549 unique count,3995
+Loops HMEC common count,7368
+Loops BT549 common count,7368
+Loops HMEC all width,60000,330000,434152.77,1960000
+Loops BT549 all width,60000,270000,350896.77,1950000
+Loops HMEC unique width,70000,390000,498066.65,1960000
+Loops BT549 unique width,60000,260000,342866.08,1950000
+Loops HMEC common width,60000,270000,355544.25,1760000
+Loops BT549 common width,70000,270000,355251.09,1760000
+HMEC all vs. BT549 all width difference,1.61e-72
+HMEC unique vs. BT549 unique width difference,1.52e-104
+HMEC unique vs. HMEC common width difference,1.26e-121
+BT549 unique vs. BT549 common width difference,1.23e-02
+Anchors HMEC all count,32860
+Anchors BT549 all count,22726
+Anchors HMEC unique count,8797
+Anchors BT549 unique count,2951
+Anchors HMEC common count,24063
+Anchors BT549 common count,19775
