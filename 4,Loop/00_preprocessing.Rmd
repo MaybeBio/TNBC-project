@@ -1,0 +1,1804 @@
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+# Set up the environment
+setwd("~/bysj_seu/geo_data/hic/script7")
+library(knitr)
+library(pander)
+panderOptions('table.split.table', Inf)
+set.seed(1)
+library(dplyr)
+options(stringsAsFactors = FALSE)
+#控制字符型向量是否被自动转换成因子。将其设置为FALSE可以避免在数据处理时出现因子变量的意外转换
+```
+
+# Libraries
+
+```{r libraries}
+library(GenomicRanges)
+library(GenomicInteractions)
+library(InteractionSet)
+library(data.table)
+# library(MDmisc)
+```
+
+# Excludable regions 排除区域，与可排除区域(着丝粒、端粒等)不重叠，为什么要排除这些区域分析?
+
+```{r}
+if (!file.exists("excludable.rda")) {
+  library(rCGH) #加载这个之后就可以使用hg19等对象了
+  library(AnnotationHub)
+  ah <- AnnotationHub()
+  # Centromeres 着丝粒
+  # Adjust chromosome names
+  hg19$chrom[hg19$chrom == 23] <- "X"
+  hg19$chrom[hg19$chrom == 24] <- "Y"
+  hg19$chrom <- paste0("chr", hg19$chrom)
+  # Make GRanges object 根据调整后的染色体名称、着丝粒的起始和结束位置构建一个GRanges对象，表示UCSC版本为hg19的人类基因组的着丝粒位置
+  hg19.UCSC.centromere <- makeGRangesFromDataFrame(hg19, seqnames.field = "chrom", start.field = "centromerStart", end.field = "centromerEnd")
+  # Assign seqinfo data 序列长度信息关联到该对象上，chrxx上的中心粒区域信息
+  seqlengths(hg19.UCSC.centromere) <- hg19$length
+  genome(hg19.UCSC.centromere)     <- "hg19"
+  
+  # Telomeres端粒
+  query_data <- query(ah, c("excluderanges", "UCSC", "Homo Sapiens", "hg19", "telomere"))
+  #查询，以获得UCSC版本为hg19的人类基因组的端粒位置数据。然后将获取到的数据赋值给变量query_data，从查询结果query_data中提取出端粒位置数据[["AH107361"]]
+  hg19.UCSC.telomere <- query_data[["AH107361"]]
+  
+  # Excluderanges需要排除的区域,范围比上面2个对象还大
+  query_data <- query(ah, c("excluderanges","hg19"))
+  #https://www.bioconductor.org/packages//release/data/annotation/vignettes/excluderanges/inst/doc/excluderanges.html对照，源代码中查询hg38之后直接选的排除区域数据
+#我的选择依据不足，就此处随机选择第一种AH107314
+  excludeGR.hg19 <- query_data[["AH107314"]]
+  save(hg19.UCSC.centromere, hg19.UCSC.telomere, excludeGR.hg19, file = "excludable.rda")
+} else {
+  load("excludable.rda")
+}
+#综上是3个对象，特别选出的着丝粒+端粒+总体排除区域
+```
+
+
+# Functions
+
+- HMEC unique - green, 0,255,0
+- BT549 unique - red, 255,0,0
+- Common - blue, 0,0,255
+注意，loop这边的数据分析，实际上只能1vs1 x3，暂时没有办法找到合并HMEC vs TNBC的方法
+
+```{r functions}
+#' Convert GInteractions to BEDPE format, color according to condition
+#' 将GInteractions对象转换为BEDPE格式，并根据给定条件对颜色进行着色,输入3个参数
+#' @param mtx_selected     data frame from GInteractions
+#' @param col      color
+#' @param conditon        condition, goes into the name field
+#' Returns a data frame with coordinates kept in full numerical format返回一个坐标保持完全数值格式的数据框 
+toBEDPE <- function(mtx_selected = as.data.frame(loops_XX_common), col = "0,255,0", condition = "Common") {
+  x_selected <- data.frame(chr1       = as.character(mtx_selected$seqnames1),
+                           x1         = mtx_selected$start1,
+                           x2         = mtx_selected$end1,
+                           chr2       = mtx_selected$seqnames2,
+                           y1         = mtx_selected$start2,
+                           y2         = mtx_selected$end2,
+                           name       = paste(condition, mtx_selected$name, sep = "_"),
+                           score      = ".",
+                           strand1    = ".",
+                           strand2    = ".",
+                           color      = col)
+  #在BEDPE格式中，每行包含两个染色体（chr1和chr2）的起始和结束坐标，以及其他附加信息。在这个函数中，起始和结束坐标被提取为x1、x2、y1和y2，并将条件添加到名字字段中。最后，将这些信息以数据框的形式返回
+  # Keep full numbers
+  x_selected$x1 <- format(x_selected$x1, scientific = FALSE, trim = TRUE, justify = "none")
+  x_selected$x2 <- format(x_selected$x2, scientific = FALSE, trim = TRUE, justify = "none")
+  x_selected$y1 <- format(x_selected$y1, scientific = FALSE, trim = TRUE, justify = "none")
+  x_selected$y2 <- format(x_selected$y2, scientific = FALSE, trim = TRUE, justify = "none")
+  return(x_selected)
+  #对起始和结束坐标使用了format函数，将科学计数法表示的数字转换为全数值格式，确保输出的是完整的数字而不是科学计数法表示
+}
+
+#' Convert GRanges to BED format, color according to condition
+#' 将GRanges对象转换为BED格式，并根据给定条件对颜色进行着色，同上输入3个参数
+#' @param mtx_selected      data frame from GRanges
+#' @param col      color
+#' @param conditon       condition, goes into the name field
+#' Returns a data frame with coordinates kept in full numerical format 返回一个坐标保持完全数值格式的数据
+toBED <- function(mtx_selected = as.data.frame(anchors_HMEC_common), col = "0,255,0", condition = "Common", header = FALSE) {
+  x_selected <- data.frame(chr        = as.character(mtx_selected$seqnames),
+                           start      = mtx_selected$start,
+                           end        = mtx_selected$end,
+                           name       = condition,
+                           score      = mtx_selected$freq,
+                           strand     = ".",
+                           thickStart = mtx_selected$start,
+                           thickEnd   = mtx_selected$end,
+                           color      = col)
+  # Largest on top对数据框x_selected按照score列进行降序排序，以便将分数最高的区间放在最顶部
+  x_selected <- x_selected[order(x_selected$score, decreasing = TRUE), ]
+  # Keep full numbers
+  x_selected$start <- format(x_selected$start, scientific = FALSE, trim = TRUE, justify = "none")
+  x_selected$end   <- format(x_selected$end, scientific = FALSE, trim = TRUE, justify = "none")
+  x_selected$thickStart <- format(x_selected$thickStart, scientific = FALSE, trim = TRUE, justify = "none")
+  x_selected$thickEnd   <- format(x_selected$thickEnd, scientific = FALSE, trim = TRUE, justify = "none")
+  # Append header参数是否为TRUE，如果是，则在生成的BED数据框的开头添加一行用于表示BED文件的头信息
+  if (header){
+    x_selected <- rbind(c("track itemRgb=On", rep("", ncol(x_selected) - 1)), x_selected)
+  }
+  return(x_selected)
+}
+
+#' Summary of loop width
+#' 获取loop宽度的统计信息，其中包括最小值、中位数、平均值和最大值。这个函数可以用于快速了解loop宽度的分布情况
+#' @param loops    GInteractions object
+#' @return Formatted string of loop min/median/mean/max
+width_summary <- function(prefix = "Loops HMEC all width", loops = loops_HMEC_unique) {
+  width_vector <- pairdist(loops)
+  #pairdist用于计算给定位置之间的距离，即loop上作用对象之间距离
+  # https://stackoverflow.com/questions/33047601/paste-collapse-with-tabs
+  width_string <- c(list(prefix), list(min(width_vector)), list(median(width_vector)), list(round(mean(width_vector), digits = 2)), list(max(width_vector)))
+  #创建一个字符向量 width_string，其中包含汇总结果的前缀、最小宽度、中位数、平均值和最大宽度
+  return(width_string)
+}
+
+#' Loop width difference test
+#' 比较两个 GInteraction 对象中loop宽度的差异性
+#' @param loops1         first GInteraction object
+#' @param loops2         second GInteraction object
+#' @return Formatted Wilcoxon p-value of width distribution differences
+width_difference <- function(loops1 = loops_HMEC_unique, loops2 = loops_BT549_unique) {
+  width_vector1 <- pairdist(loops1)
+  width_vector2 <- pairdist(loops2)
+  # If width is NA (for neoloops), return 1
+  if (sum(is.na(width_vector1)) > 0 | sum(is.na(width_vector2)) > 0) {
+    return(1)
+  } else {
+    return(formatC(wilcox.test(width_vector1, width_vector2)$p.value, format = "e", digits = 2))
+  }
+}
+#如果其中一个loop中的宽度有缺失值（NA），则返回值为 1
+#如果两个loop的宽度都没有缺失值，则使用 wilcox.test() 函数进行 Wilcoxon秩和检验，比较两组宽度的分布差异，并返回经过格式化的 p 值
+```
+
+# Settings
+
+```{r settings, echo=TRUE}
+# Resolution, or Window size for SpectralTAD only
+res <- "10000" #10kb
+# How to treat adjacent anchors
+#表示是否合并相邻的锚点，如果设置为 TRUE，则会合并相邻的锚点；如果设置为 FALSE，则不会合并相邻的锚点
+merge_adjacent <- TRUE
+# Overlap type for findOverlaps
+#设置了一个字符串变量 overlap_type，表示在查找锚点之间的重叠时如何处理。如果 merge_adjacent 设置为 TRUE，则重叠类型为 "any"，表示只要锚点之间存在重叠即可；如果 merge_adjacent 设置为 FALSE，则重叠类型为 "equal"，表示只有锚点完全重叠时才算重叠
+if (merge_adjacent) {
+  overlap_type <- "any"
+} else {   
+  overlap_type <- "equal"
+}
+```
+
+# Load data
+
+Creation of HMEC and BT549 GInteractions
+！！！！！！！！！！！！！！！！！注意：
+1，此处不再引入其他res的数据，就单纯使用10kb的数据，不用再合并其他res
+2,1vs1 x3，其他sample数据也同样处理
+注意下面的数据是全部3个rep一起处理
+
+## Mustache
+事实上能够注意到下面的函数 mtx2GInteractions中其实提取的就是2个anchor的信息数据，所以并没有用上其他几列的数据
+
+```{r mustache, eval=FALSE}
+# Mustache data 输出的就是tsv文件，无论是差异的diff_mustache还是单个rep的输出文件；保存tsv文件的目录
+dir_data <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result"
+#按照下面表现是要获取各自的tsv文件，或许是mustache最新版的功能没用上，所以不是使用diff_mustache，下面使用的是合并之后的数据，
+#tsv文件是BIN1_CHR   BIN1_START   BIN1_END    BIN2_CHROMOSOME BIN2_START    BIN2_END    FDR   DETECTION_SCALE一共7列
+#下面文件要不要进行修改以匹配mustache的输出！！！！！！！！！！！！！
+#mustache文件输出都保存成xxx_10000.tsv(直接使用单一rep)
+fileNameIn1 <- file.path(dir_data, paste0("HMEC_", res, ".tsv")) # HMEC
+fileNameIn2 <- file.path(dir_data, paste0("BT549_", res, ".tsv")) # BT549
+fileNameIn3 <- file.path(dir_data, paste0("HCC70_", res, ".tsv")) # HCC70
+fileNameIn4 <- file.path(dir_data, paste0("MB231_", res, ".tsv")) # MB231
+
+# Function to construct GInteractions
+# Should be modified for different data
+mtx2GInteractions <- function(fileNameIn = fileNameIn1, condition = "HMEC") {
+  # Load data
+  mtx <- read.table(fileNameIn, sep = "\t", header = TRUE)
+  #原来tsv文件列名是含有chr的，所以下面的paste0不用chr  
+  #使用 makeGRangesFromDataFrame() 函数将 gr1 和 gr2 转换为 GRanges 对象。在转换过程中，需要注意设置 seqinfo 参数，确保序列信息正确
+  gr1 <- data.frame(chr   = paste0(mtx[, 1]),  
+                    start = mtx[, 2],
+                    end   = mtx[, 3]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(paste0(mtx[, 1]), paste0(mtx[, 4]))))
+  gr2 <- data.frame(chr   = paste0(mtx[, 4]),
+                    start = mtx[, 5], 
+                    end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(paste0(mtx[, 1]), paste0(mtx[, 4]))))  
+   
+  # Domain GRanges overlapping centromeres 这里说明TAD分析过程中也可以使用该功能！！！！！！！！1
+  # gr  <- data.frame(chr   = mtx[, 1], 
+  #                   start = mtx[, 2], 
+  #                   end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(mtx[, 1]))
+  # gr_centromere  <- findOverlaps(gr,  hg19.UCSC.centromere, type = "any")
+  
+  #分别计算了 gr1 和 gr2 区域与着丝粒位置、端粒位置以及需排除的区域之间的重叠情况
+  gr1_centromere  <- findOverlaps(gr1,  hg19.UCSC.centromere, type = "any")
+  gr2_centromere  <- findOverlaps(gr2,  hg19.UCSC.centromere, type = "any") 
+  # Boundaries overlapping telomeres  
+  gr1_telomeres  <- findOverlaps(gr1, hg19.UCSC.telomere, type = "any")
+  gr2_telomeres  <- findOverlaps(gr2, hg19.UCSC.telomere, type = "any")
+  # Boundaries overlapping excludable regions 
+  gr1_exclude    <- findOverlaps(gr1, excludeGR.hg19, type = "any")
+  gr2_exclude    <- findOverlaps(gr2, excludeGR.hg19, type = "any")
+  # Index to exclude
+  #通过 queryHits() 函数从前面计算得到的重叠结果中提取索引，然后使用 unique() 函数去除重复的索引，并使用 sort() 函数对索引进行排序。这些索引代表了需要排除的区域的位置，下面是所有区域都排除
+  index_exclude  <- sort(unique(c(queryHits(gr1_centromere), queryHits(gr2_centromere), queryHits(gr1_telomeres), queryHits(gr2_telomeres), queryHits(gr1_exclude), queryHits(gr2_exclude))))
+  # Complement index to include 
+  #使用 seq() 函数生成一个从 1 到 gr1 区域长度的序列，然后使用 setdiff() 函数计算该序列与 index_exclude 的差集，得到的结果就是需要保留的区域的位置。这些位置被存储在 index_include 中
+  index_include  <- setdiff(seq(1:length(gr1)), index_exclude)
+  #选择 gr1 或 gr2 的长度来生成序列都是可以的，因为这两者应该是相同的长度（或者具有相同的区域数目）。因此，可以选择任意一个区域的长度来生成序列
+  
+  # GInteractions excluding selected boundaries,实际上就是筛选两个anchor鞍点
+  #基于选定的索引 index_include 筛选出需要保留的锚点，并构建 GInteractions 对象
+  gi <- GInteractions(gr1[index_include], gr2[index_include], mode = "strict")
+  # Construct name，为 GInteractions 对象的 name 属性赋值，构建锚点的名称。这里的名称由多个部分组成，包括条件、锚点宽度、FDR 值和 SCALE 值。锚点宽度是通过 calculateDistances() 函数计算得到的，FDR 值和 SCALE 值是从原始数据中提取得到的
+  gi$name <- paste(condition,
+                    paste("Width", calculateDistances(gi), sep = ":"),
+                    paste("FDR", formatC(mtx[index_include, 7], format = "e", digits = 2), sep = ":"),
+                    paste("SCALE", round(mtx[index_include, 8], digits = 2), sep = ":"), sep = "_")
+  return(gi)
+}
+#根据指定的索引筛选需要保留的锚点，并构建相应的 GInteractions 对象，以便后续的分析和处理
+
+# Create condition-specific GInteractions调用上述函数识别鞍点
+gi_HMEC <- mtx2GInteractions(fileNameIn = fileNameIn1, condition = "HMEC")
+gi_BT549 <- mtx2GInteractions(fileNameIn = fileNameIn2, condition = "BT549")
+gi_HCC70 <- mtx2GInteractions(fileNameIn = fileNameIn3, condition = "HCC70")
+gi_MB231 <- mtx2GInteractions(fileNameIn = fileNameIn4, condition = "MB231")
+# Make seqlevels the same使两个 GInteractions 对象在序列级别上保持一致
+seqlevels(gi_HMEC) <- seqlevels(gi_BT549) <- unique(c(seqlevels(gi_HMEC), seqlevels(gi_BT549)))
+seqlevels(gi_HMEC) <- seqlevels(gi_HCC70) <- unique(c(seqlevels(gi_HMEC), seqlevels(gi_HCC70)))
+seqlevels(gi_HMEC) <- seqlevels(gi_MB231) <- unique(c(seqlevels(gi_HMEC), seqlevels(gi_MB231)))
+
+```
+
+## HiCcompare 暂时用不上，loop calling使用mustache
+
+```{r HiCcompare, eval=FALSE}
+# HiCcompare data
+dir_data <- "/Users/mdozmorov/Documents/Data/GoogleDrive/HiC_files/results/HiCcompare_results_v2"
+fileNameIn1 <- file.path(dir_data, paste0(res, "kb_glob_fdr_DN.bedpe")) # PR
+fileNameIn2 <- file.path(dir_data, paste0(res, "kb_glob_fdr_UP.bedpe")) # CR
+# Function to construct GInteractions
+# Should be modified for different data
+mtx2GInteractions <- function(fileNameIn = fileNameIn1, condition = "PR") {
+  # Load data
+  mtx <- read.table(fileNameIn, sep = "\t", header = FALSE)
+  gr1 <- data.frame(chr   = mtx[, 1],
+                    start = mtx[, 2],
+                    end   = mtx[, 3]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(mtx[, 1], mtx[, 4])))
+  gr2 <- data.frame(chr   = mtx[, 4],
+                    start = mtx[, 5],
+                    end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(mtx[, 1], mtx[, 4])))
+  
+  # Domain GRanges overlapping centromeres
+  # gr  <- data.frame(chr   = mtx[, 1],
+  #                   start = mtx[, 2],
+  #                   end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(mtx[, 1]))
+  # gr_centromere  <- findOverlaps(gr,  hg19.UCSC.centromere, type = "any")
+  gr1_centromere  <- findOverlaps(gr1,  hg19.UCSC.centromere, type = "any")
+  gr2_centromere  <- findOverlaps(gr2,  hg19.UCSC.centromere, type = "any")
+  # Boundaries overlapping telomeres
+  gr1_telomeres  <- findOverlaps(gr1, hg19.UCSC.telomere, type = "any")
+  gr2_telomeres  <- findOverlaps(gr2, hg19.UCSC.telomere, type = "any")
+  # Boundaries overlapping excludable regions
+  gr1_exclude    <- findOverlaps(gr1, excludeGR.hg19.Kundaje.1, type = "any")
+  gr2_exclude    <- findOverlaps(gr2, excludeGR.hg19.Kundaje.1, type = "any")
+  # Index to exclude
+  index_exclude  <- sort(unique(c(queryHits(gr1_centromere), queryHits(gr2_centromere), queryHits(gr1_telomeres), queryHits(gr2_telomeres), queryHits(gr1_exclude), queryHits(gr2_exclude))))
+  # Complement index to include
+  index_include  <- setdiff(seq(1:length(gr1)), index_exclude)
+  
+  # GInteractions excluding selected boundaries
+  gi <- GInteractions(gr1[index_include], gr2[index_include], mode = "strict")
+  # Construct name
+  gi$name <- paste(condition,
+                   paste("Width", calculateDistances(gi), sep = ":"),
+                   paste("M", round(mtx[index_include, 7], digits = 2), sep = ":"),
+                   paste("D", round(mtx[index_include, 8], digits = 2), sep = ":"),
+                   paste("A", round(mtx[index_include, 9], digits = 2), sep = ":"),
+                   paste("padj", formatC(mtx[index_include, 10], format = "e", digits = 2), sep = ":"), sep = "_")
+  return(gi)
+}
+# Create condition-specific GInteractions
+gi_PR <- mtx2GInteractions(fileNameIn = fileNameIn1, condition = "PR")
+gi_CR <- mtx2GInteractions(fileNameIn = fileNameIn2, condition = "CR")
+# Make seqlevels the same
+seqlevels(gi_PR) <- seqlevels(gi_CR) <- unique(c(seqlevels(gi_PR), seqlevels(gi_CR)))
+```
+
+## NeoLoopFinder 暂时用不上，loop calling使用mustache
+
+```{r neoloopfinder, eval=TRUE}
+# Neoloopfinder data
+# dir_data <- "/Users/mdozmorov/Documents/Data/GoogleDrive/HiC_files/results/neoloopfinder_results_v2"
+dir_data <- "/Users/mdozmorov/Documents/Data/GoogleDrive/HiC_files/results/neoloopfinder_results_v2/10-06-2021-neoloopfinder-neoloops-Kavita"
+fileNameIn1 <- file.path(dir_data, "PR.neoloopfinder.loops.txt") # PR
+fileNameIn2 <- file.path(dir_data, "CR.neoloopfinder.loops.txt") # CR
+
+# Function to construct GInteractions
+# Should be modified for different data
+mtx2GInteractions <- function(fileNameIn = fileNameIn1, condition = "PR") {
+  # Load data
+  mtx <- read.table(fileNameIn, sep = "\t", header = FALSE)
+  # Subset to neoloops, marked as "1" in the third position of assembly column
+  mtx <- mtx[sapply(mtx[, 7], function(x) strsplit(x, ",")[[1]][3]) == "1", ]
+  gr1 <- data.frame(chr   = mtx[, 1],
+                    start = mtx[, 2],
+                    end   = mtx[, 3]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(mtx[, 1], mtx[, 4])))
+  gr2 <- data.frame(chr   = mtx[, 4],
+                    start = mtx[, 5],
+                    end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(mtx[, 1], mtx[, 4])))
+
+  # Domain GRanges overlapping centromeres
+  # gr  <- data.frame(chr   = mtx[, 1],
+  #                   start = mtx[, 2],
+  #                   end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(mtx[, 1]))
+  gr1_centromere  <- findOverlaps(gr1,  hg19.UCSC.centromere, type = "any")
+  gr2_centromere  <- findOverlaps(gr2,  hg19.UCSC.centromere, type = "any")
+  # Boundaries overlapping telomeres
+  gr1_telomeres  <- findOverlaps(gr1, hg19.UCSC.telomere, type = "any")
+  gr2_telomeres  <- findOverlaps(gr2, hg19.UCSC.telomere, type = "any")
+  # Boundaries overlapping excludable regions
+  gr1_exclude    <- findOverlaps(gr1, excludeGR.hg19.Kundaje.1, type = "any")
+  gr2_exclude    <- findOverlaps(gr2, excludeGR.hg19.Kundaje.1, type = "any")
+  # Index to exclude
+  index_exclude  <- sort(unique(c(queryHits(gr1_centromere), queryHits(gr2_centromere), queryHits(gr1_telomeres), queryHits(gr2_telomeres), queryHits(gr1_exclude), queryHits(gr2_exclude))))
+  # Complement index to include
+  index_include  <- setdiff(seq(1:length(gr1)), index_exclude)
+  
+  # GInteractions excluding selected boundaries
+  gi <- GInteractions(gr1[index_include], gr2[index_include], mode = "strict")
+  # Construct name
+  gi$name <- paste(condition, paste("Width", calculateDistances(gi), sep = ":"), mtx[index_include, 7], sep = "_")
+  return(gi)
+}
+# Create condition-specific GInteractions
+gi_PR <- mtx2GInteractions(fileNameIn = fileNameIn1, condition = "PR")
+gi_CR <- mtx2GInteractions(fileNameIn = fileNameIn2, condition = "CR")
+# Make seqlevels the same
+seqlevels(gi_PR) <- seqlevels(gi_CR) <- unique(c(seqlevels(gi_PR), seqlevels(gi_CR)))
+```
+
+## GENOVA 暂时用不上，loop calling使用mustache，但是后续TAD分析可以考虑，确实看出来这里使用的是TAD的边界数据
+
+```{r genova, eval=FALSE}
+# Neoloopfinder data
+dir_data <- "/Users/mdozmorov/Documents/Data/GoogleDrive/HiC_files/results/TAD_Boundaries/GENOVA_IS"
+fileNameIn1 <- file.path(dir_data, paste0("UCD52PR_", res, "000.pairedbed")) # PR
+fileNameIn2 <- file.path(dir_data, paste0("UCD52CR_", res, "000.pairedbed")) # CR
+# Load PR data
+mtx_PR <- read.table(fileNameIn1, sep = "\t", header = FALSE)
+gr1 <- data.frame(chr   = mtx_PR[, 1],
+                  start = mtx_PR[, 2],
+                  end   = mtx_PR[, 3]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(mtx_PR[, 1], mtx_PR[, 4])))
+gr2 <- data.frame(chr   = mtx_PR[, 4],
+                  start = mtx_PR[, 5],
+                  end   = mtx_PR[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(mtx_PR[, 1], mtx_PR[, 4])))
+gi_PR <- GInteractions(gr1, gr2, mode = "strict")
+# Construct name
+gi_PR$name <- paste("Width", calculateDistances(gi_PR), sep = ":")
+
+# Load CR data
+mtx_CR <- read.table(fileNameIn2, sep = "\t", header = FALSE)
+gr1 <- data.frame(chr   = mtx_CR[, 1],
+                  start = mtx_CR[, 2],
+                  end   = mtx_CR[, 3]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(mtx_CR[, 1], mtx_CR[, 4])))
+gr2 <- data.frame(chr   = mtx_CR[, 4],
+                  start = mtx_CR[, 5],
+                  end   = mtx_CR[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(mtx_CR[, 1], mtx_CR[, 4])))
+gi_CR <- GInteractions(gr1, gr2, mode = "strict")
+# Construct name
+gi_CR$name <- paste("Width", calculateDistances(gi_CR), sep = ":")
+# Make seqlevels the same
+seqlevels(gi_PR) <- seqlevels(gi_CR) <- unique(c(seqlevels(gi_PR), seqlevels(gi_CR)))
+```
+
+## SpectralTAD 暂时用不上，但是后续TAD分析可以考虑
+
+```{r spectraltad, eval=FALSE}
+# Neoloopfinder data
+dir_data <- "/Users/mdozmorov/Documents/Data/GoogleDrive/HiC_files/results/TAD_Boundaries/SpectralTAD_v2/"
+fileNameIn1 <- file.path(dir_data, paste0("UCD52PR_VC_10000_qualT_zT_", res, "_0.8.pairedbed")) # PR
+fileNameIn2 <- file.path(dir_data, paste0("UCD52CR_VC_10000_qualT_zT_", res, "_0.8.pairedbed")) # CR
+
+# Function to construct GInteractions
+# Should be modified for different data
+mtx2GInteractions <- function(fileNameIn = fileNameIn1, condition = "PR") {
+  # Load data
+  mtx <- read.table(fileNameIn, sep = "\t", header = FALSE)
+  gr1 <- data.frame(chr   = mtx[, 1],
+                    start = mtx[, 2],
+                    end   = mtx[, 3]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(mtx[, 1], mtx[, 4])))
+  gr2 <- data.frame(chr   = mtx[, 4],
+                    start = mtx[, 5],
+                    end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(mtx[, 1], mtx[, 4])))
+
+  # Domain GRanges overlapping centromeres
+  # gr  <- data.frame(chr   = mtx[, 1],
+  #                   start = mtx[, 2],
+  #                   end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(mtx[, 1]))
+  gr1_centromere  <- findOverlaps(gr1,  hg19.UCSC.centromere, type = "any")
+  gr2_centromere  <- findOverlaps(gr2,  hg19.UCSC.centromere, type = "any")
+  # Boundaries overlapping telomeres
+  gr1_telomeres  <- findOverlaps(gr1, hg19.UCSC.telomere, type = "any")
+  gr2_telomeres  <- findOverlaps(gr2, hg19.UCSC.telomere, type = "any")
+  # Boundaries overlapping excludable regions
+  gr1_exclude    <- findOverlaps(gr1, excludeGR.hg19.Kundaje.1, type = "any")
+  gr2_exclude    <- findOverlaps(gr2, excludeGR.hg19.Kundaje.1, type = "any")
+  # Index to exclude
+  index_exclude  <- sort(unique(c(queryHits(gr1_centromere), queryHits(gr2_centromere), queryHits(gr1_telomeres), queryHits(gr2_telomeres), queryHits(gr1_exclude), queryHits(gr2_exclude))))
+  # Complement index to include
+  index_include  <- setdiff(seq(1:length(gr1)), index_exclude)
+  
+  # GInteractions excluding selected boundaries
+  gi <- GInteractions(gr1[index_include], gr2[index_include], mode = "strict")
+  # Construct name
+  gi$name <- paste(condition, paste("Width", calculateDistances(gi), sep = ":"), sep = "_")
+  return(gi)
+}
+# Create condition-specific GInteractions
+gi_PR <- mtx2GInteractions(fileNameIn = fileNameIn1, condition = "PR")
+gi_CR <- mtx2GInteractions(fileNameIn = fileNameIn2, condition = "CR")
+# Make seqlevels the same
+seqlevels(gi_PR) <- seqlevels(gi_CR) <- unique(c(seqlevels(gi_PR), seqlevels(gi_CR)))
+```
+
+## hicFindTADs 暂时用不上，但是后续TAD分析可以考虑，这个倒是可以用，因为我TAD分析中call边界用的就是GENOVA以及hicexplorer中的hicfindTAD
+
+```{r hicFindTADs, eval=FALSE}
+# hicFindTADs data
+dir_data <- "/Users/mdozmorov/Documents/Data/GoogleDrive/HiC_files/results/TAD_Boundaries/hicFindTADs_v2"
+fileNameIn1 <- file.path(dir_data, "UCD52PR_10000_norm_KR_0.0005_domains.bed")
+fileNameIn2 <- file.path(dir_data, "UCD52CR_10000_norm_KR_0.0005_domains.bed")
+# Function to construct GInteractions
+# Should be modified for different data
+mtx2GInteractions <- function(fileNameIn = fileNameIn1, condition = "PR") {
+  # Load data
+  mtx <- read.table(fileNameIn, sep = "\t", header = FALSE)
+  gr1 <- data.frame(chr   = mtx[, 1],
+                    start = mtx[, 2] - (as.numeric(res) * 1000 / 2),
+                    end   = mtx[, 2] + (as.numeric(res) * 1000 / 2)) %>% makeGRangesFromDataFrame(., seqinfo = unique(mtx[, 1]))
+  gr2 <- data.frame(chr   = mtx[, 1],
+                    start = mtx[, 3] - (as.numeric(res) * 1000 / 2),
+                    end   = mtx[, 3] + (as.numeric(res) * 1000 / 2)) %>% makeGRangesFromDataFrame(., seqinfo = unique(mtx[, 1]))
+  
+  # Domain GRanges overlapping centromeres
+  # gr  <- data.frame(chr   = mtx[, 1],
+  #                   start = mtx[, 2],
+  #                   end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(mtx[, 1]))
+  gr1_centromere  <- findOverlaps(gr1,  hg19.UCSC.centromere, type = "any")
+  gr2_centromere  <- findOverlaps(gr2,  hg19.UCSC.centromere, type = "any")
+  # Boundaries overlapping telomeres
+  gr1_telomeres  <- findOverlaps(gr1, hg19.UCSC.telomere, type = "any")
+  gr2_telomeres  <- findOverlaps(gr2, hg19.UCSC.telomere, type = "any")
+  # Boundaries overlapping excludable regions
+  gr1_exclude    <- findOverlaps(gr1, excludeGR.hg19.Kundaje.1, type = "any")
+  gr2_exclude    <- findOverlaps(gr2, excludeGR.hg19.Kundaje.1, type = "any")
+  # Index to exclude
+  index_exclude  <- sort(unique(c(queryHits(gr1_centromere), queryHits(gr2_centromere), queryHits(gr1_telomeres), queryHits(gr2_telomeres), queryHits(gr1_exclude), queryHits(gr2_exclude))))
+  # Complement index to include
+  index_include  <- setdiff(seq(1:length(gr1)), index_exclude)
+  
+  # GInteractions excluding selected boundaries
+  gi <- GInteractions(gr1[index_include], gr2[index_include], mode = "strict")
+  # Construct name
+  gi$name <- paste(condition, paste("Width", calculateDistances(gi), sep = ":"), mtx[index_include, 4], round(mtx[index_include, 5], digits = 2), sep = "_")
+  return(gi)
+}
+# Create condition-specific GInteractions
+gi_PR <- mtx2GInteractions(fileNameIn = fileNameIn1, condition = "PR")
+gi_CR <- mtx2GInteractions(fileNameIn = fileNameIn2, condition = "CR")
+# Make seqlevels the same
+seqlevels(gi_PR) <- seqlevels(gi_CR) <- unique(c(seqlevels(gi_PR), seqlevels(gi_CR)))
+```
+
+# Results file names 主要是对于loop分析，其他TAD依据前面的函数自己发挥拓展
+注意结果输出的文件夹以及各自命名的规则:
+BT549:BT549_preprocessing_,dir_results1,文件是123
+HCC70:HCC70_preprocessing_,dir_results2,文件是456
+MB231:MB231_preprocessing_,dir_results3,文件是789
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!或者是看看后面针对1vs1的合并gene的时候能不能用在3个TNBC上
+```{r results}
+#下面是HMEC vs BT549的 
+# Results
+dir_results1  <- file.path(dir_data, paste0("BT549_preprocessing_", overlap_type)) 
+dir.create(dir_results1, recursive = TRUE) # Create if does not exist
+## Loops 因为分辨率我前面都改成了10000具体数字，就不用kb了
+fileNameOut1.1 <- file.path(dir_results1, paste0("loops_HMEC_unique_", res, ".bedpe"))
+fileNameOut1.2 <- file.path(dir_results1, paste0("loops_BT549_unique_", res, ".bedpe"))
+fileNameOut1.3 <- file.path(dir_results1, paste0("loops_HMEC_common_", res, ".bedpe"))
+fileNameOut1.4 <- file.path(dir_results1, paste0("loops_BT549_common_", res, ".bedpe"))
+fileNameOut1.5 <- file.path(dir_results1, paste0("loops_combined_",  res, ".bedpe"))
+fileNameOut1.6 <- file.path(dir_results1, paste0("loops_HMEC_all_",  res, ".bedpe"))
+fileNameOut1.7 <- file.path(dir_results1, paste0("loops_BT549_all_",  res, ".bedpe"))
+## Anchors 
+fileNameOut2.1 <- file.path(dir_results1, paste0("anchors_HMEC_unique_", res, ".bed"))
+fileNameOut2.2 <- file.path(dir_results1, paste0("anchors_BT549_unique_", res, ".bed"))
+fileNameOut2.3 <- file.path(dir_results1, paste0("anchors_HMEC_common_", res, ".bed"))
+fileNameOut2.4 <- file.path(dir_results1, paste0("anchors_BT549_common_", res, ".bed"))
+fileNameOut2.5 <- file.path(dir_results1, paste0("anchors_combined_", res, ".bed"))
+fileNameOut2.6 <- file.path(dir_results1, paste0("anchors_HMEC_all_", res, ".bed"))
+fileNameOut2.7 <- file.path(dir_results1, paste0("anchors_BT549_all_", res, ".bed"))
+# Statistics with the number of loops and anchors
+fileNameOut3 <- file.path(dir_results1, paste0("log_", res, ".csv"))
+
+ 
+
+
+#再下面是HMEC vs HCC70
+dir_results2  <- file.path(dir_data, paste0("HCC70_preprocessing_", overlap_type)) 
+dir.create(dir_results2, recursive = TRUE) # Create if does not exist
+## Loops 因为分辨率我前面都改成了10000具体数字，就不用kb了
+fileNameOut4.1 <- file.path(dir_results2, paste0("loops_HMEC_unique_", res, ".bedpe"))
+fileNameOut4.2 <- file.path(dir_results2, paste0("loops_HCC70_unique_", res, ".bedpe"))
+fileNameOut4.3 <- file.path(dir_results2, paste0("loops_HMEC_common_", res, ".bedpe"))
+fileNameOut4.4 <- file.path(dir_results2, paste0("loops_HCC70_common_", res, ".bedpe"))
+fileNameOut4.5 <- file.path(dir_results2, paste0("loops_combined_",  res, ".bedpe"))
+fileNameOut4.6 <- file.path(dir_results2, paste0("loops_HMEC_all_",  res, ".bedpe"))
+fileNameOut4.7 <- file.path(dir_results2, paste0("loops_HCC70_all_",  res, ".bedpe"))
+## Anchors
+fileNameOut5.1 <- file.path(dir_results2, paste0("anchors_HMEC_unique_", res, ".bed"))
+fileNameOut5.2 <- file.path(dir_results2, paste0("anchors_HCC70_unique_", res, ".bed"))
+fileNameOut5.3 <- file.path(dir_results2, paste0("anchors_HMEC_common_", res, ".bed"))
+fileNameOut5.4 <- file.path(dir_results2, paste0("anchors_HCC70_common_", res, ".bed"))
+fileNameOut5.5 <- file.path(dir_results2, paste0("anchors_combined_", res, ".bed"))
+fileNameOut5.6 <- file.path(dir_results2, paste0("anchors_HMEC_all_", res, ".bed"))
+fileNameOut5.7 <- file.path(dir_results2, paste0("anchors_HCC70_all_", res, ".bed"))
+# Statistics with the number of loops and anchors
+fileNameOut6 <- file.path(dir_results2, paste0("log_", res, ".csv"))
+
+
+
+
+#再往下是HMEC vs MB231
+dir_results3  <- file.path(dir_data, paste0("MB231_preprocessing_", overlap_type)) 
+dir.create(dir_results3, recursive = TRUE) # Create if does not exist
+## Loops 因为分辨率我前面都改成了10000具体数字，就不用kb了
+fileNameOut7.1 <- file.path(dir_results3, paste0("loops_HMEC_unique_", res, ".bedpe"))
+fileNameOut7.2 <- file.path(dir_results3, paste0("loops_MB231_unique_", res, ".bedpe"))
+fileNameOut7.3 <- file.path(dir_results3, paste0("loops_HMEC_common_", res, ".bedpe"))
+fileNameOut7.4 <- file.path(dir_results3, paste0("loops_MB231_common_", res, ".bedpe"))
+fileNameOut7.5 <- file.path(dir_results3, paste0("loops_combined_",  res, ".bedpe"))
+fileNameOut7.6 <- file.path(dir_results3, paste0("loops_HMEC_all_",  res, ".bedpe"))
+fileNameOut7.7 <- file.path(dir_results3, paste0("loops_MB231_all_",  res, ".bedpe"))
+## Anchors
+fileNameOut8.1 <- file.path(dir_results3, paste0("anchors_HMEC_unique_", res, ".bed"))
+fileNameOut8.2 <- file.path(dir_results3, paste0("anchors_MB231_unique_", res, ".bed"))
+fileNameOut8.3 <- file.path(dir_results3, paste0("anchors_HMEC_common_", res, ".bed"))
+fileNameOut8.4 <- file.path(dir_results3, paste0("anchors_MB231_common_", res, ".bed"))
+fileNameOut8.5 <- file.path(dir_results3, paste0("anchors_combined_", res, ".bed"))
+fileNameOut8.6 <- file.path(dir_results3, paste0("anchors_HMEC_all_", res, ".bed"))
+fileNameOut8.7 <- file.path(dir_results3, paste0("anchors_MB231_all_", res, ".bed"))
+# Statistics with the number of loops and anchors
+fileNameOut9 <- file.path(dir_results3, paste0("log_", res, ".csv"))
+
+
+```
+
+# Separate loops 主要处理收集bedPE文件
+
+注意findoverlaps函数的用法：
+参考https://mp.weixin.qq.com/s/CdWmt5E4fH1UsMsyYe_7Xg
+主要是获得目的2个基因组区域有交集部分区域，会返回在各自数据集中的索引，比如说对象1的第X个对象即第X个loop和对象2的第Y个loop之间有区域交集，那么最后结果返回的就会有X Y这么一条
+
+
+其实可以看出，后续对于anchor所谓的相同使用的也就是any的overlap
+所以仔细分析就是：
+第一个的findoverlap只是使用any扩大一个非常宽松的范围，但是实际上并没有筛选common的loop+anchor，应该是筛选出一个大范围的loop数据，然后再细致到anchor中进行真正的common的筛选，但是前面已经将findoverlap之外的loop视为unique的loople，倒是common的loop需要进一步依据anchor数据进一步筛选
+
+我还以为是这里筛选出commonloop之后再使用差集获取diff的loop数据，但是看样子前面识别的unique的loop已经是最后的结果了，那这样一来最后common+unique不一定=all
+我还是在想，这里找到的common的大前提的loop，是2x2个anchor中有任意1个overlap，
+那取差集实际上就是完全没有overlap anchor的loop，作为特异性的，当然也有问题，因为anchor就只有10kb即res的数据
+然后common是要两个anchor各自1vs1,2vs2有overlap的
+
+
+就是理论上的common没有太大问题，但是unique需要另外all-common
+主要是前面对两个区域范围的grange对象能不能使findoverlap
+
+主要是该脚本中处理的loop以及anchor的数据有疑问，但是过程代码难理解
+所以直接从结果上看是不是loop以及anchor数据都没有遗失
+```{r}
+ gi_BT549  #11363,要看最上面的数据
+ loops_BT549_common  #7368
+ loops_BT549_unique  #3995
+ #很奇怪，最后的数据居然都合得上  @common+unique=all
+ 
+ gi_HCC70  #12631
+ loops_HCC70_common  #7285
+ loops_HCC70_unique #5346
+ 
+ gi_MB231  #8156
+ loops_MB231_common  #5611
+ loops_MB231_unique #2545
+ 
+  gi_HMEC  #16430
+ loops_HMEC_common  #5611
+ loops_HMEC_unique #10819 
+```
+我觉得common的思路没有错，大前提overlap+细节anchor overlap两步到位
+然后unique再all-common
+但是这里是直接common的大前提里就all-common了
+
+```{r}
+#试验一下对于2对象的any的findoverlap，还是以HMECvsBT549为例
+gi_HMEC  #16430
+gi_BT549  #11363
+index_common_loops #7368 hits
+
+gi_HMEC[1:5]
+gi_BT549[86:90]
+
+gi_HMEC[c(16422,16424,16427,16428,16430)]
+gi_BT549[c(11305,11306,11309,11311,11314)]
+
+gi_HMEC  #16430
+gi_BT549  #11363
+index_common_loops #7368 hits
+loops_HMEC_unique #9062
+loops_BT549_unique #3995
+loops_HMEC_common #7368
+loops_BT549_common #7368
+  
+gi_HMEC  #16430
+gi_HCC70  #12631
+index_common_loops #7285 hits
+loops_HMEC_unique #9145
+loops_HCC70_unique #5346
+loops_HMEC_common #7285 
+loops_HCC70_common #7285
+
+gi_HMEC  #16430
+gi_MB231  #8156
+index_common_loops #5611 hits
+loops_HMEC_unique #10819
+loops_MB231_unique #2545
+loops_HMEC_common #5611
+loops_MB231_common #5611
+
+#从上面的结果可以看出，从最后结果而言，common+unique是=all数据的，说明数目上没问题（结果而言）
+#另外index common的数据和各样本common的数目一样多，因为common的思路没有问题，所以大前提下找到的common就是最终的common数据，那么all-大前提的common=all-思路正确的最终的common，那最后的unique的数据也就得到了保证，其实从侧面验证了loop call坐标的特殊性
+ 
+```
+
+```{r separate_loops}
+# Intersect loops,实际上就是比较loop区域的交集对应的索引；注意这里的loop的数据，实际上就是range1+range2，也就是两个anchor的范围所构成的一个范围数据对象；然后使用       
+index_common_loops <- findOverlaps(gi_HMEC, gi_BT549, type = overlap_type) #前面的gi就是从mtx中获取互作GR对象，算是寻找loop，这一步才是找loop的交集,那应该就是某行是有交集的
+# Condition-specific loops complementing common取差集，即取特异性loop，前面是全部的loop，然后后者就是anchor区域有交集的，就是所谓的公共的loop
+loops_HMEC_unique <- gi_HMEC[setdiff(1:length(gi_HMEC), unique(queryHits(index_common_loops)))]
+loops_BT549_unique <- gi_BT549[setdiff(1:length(gi_BT549), unique(subjectHits(index_common_loops)))]
+      
+# Common loops should have identical first and second anchors. Don't check if no overlap, length(index_common_loops) is 0  除了loop要有交集，还得anchor也有重叠(指的是鞍点)
+#如果是 0，说明没有重叠的loop，无需进行后续的检查  
+if (length(index_common_loops) != 0) {
+  #下面的数据分析实际上，就是对已经有的overlap的筛选，就是前面已经筛选出了any的overlap的数据，但是any还不行，any只是对loop进行的分析，如果要真的说是一致的loop，那肯定是要深入anchor角度进行的分析      
+  # Overlap between first anchors,对anchor1的any的overlap的识别，前提是在最前面overlap筛选之后的对象基础上
+  overlap_common_loops1 <- findOverlaps(anchorOne(gi_HMEC[queryHits(index_common_loops)]), anchorOne(gi_BT549[subjectHits(index_common_loops)]), type=overlap_type)
+  # Overlap between second anchors，同上
+  overlap_common_loops2 <- findOverlaps(anchorTwo(gi_HMEC[queryHits(index_common_loops)]), anchorTwo(gi_BT549[subjectHits(index_common_loops)]), type=overlap_type)
+  #使用 findOverlaps() 函数计算 gi_HMEC 和 gi_BT549 中重叠loop的第一个锚点和第二个锚点之间的重叠
+  # Their indices should be equal queryHits(overlap_common_loops1)和subjectHits(overlap_common_loops1)用于获取第一个重叠结果中的查询和主体索引，简单理解为queryHits(index_common_loops)用于获取这些循环在gi_HMEC数据集中的索引，而subjectHits(index_common_loops)用于获取在gi_BT549数据集中的索引，就是分开找loop1/2中的1/2anchor
+  stopifnot(all.equal(unique(sort(queryHits(overlap_common_loops1))),
+                      unique(sort(subjectHits(overlap_common_loops1)))) &
+            all.equal(unique(sort(queryHits(overlap_common_loops2))), 
+                      unique(sort(subjectHits(overlap_common_loops2)))))
+  # stopifnot(all.equal(anchorOne(gi_PR[queryHits(index_common_loops)]), anchorOne(gi_CR[subjectHits(index_common_loops)]))  & 
+  #   all.equal(anchorTwo(gi_PR[queryHits(index_common_loops)]), anchorTwo(gi_CR[subjectHits(index_common_loops)]))) 
+}
+# Actual common loops
+loops_HMEC_common <- gi_HMEC[unique(queryHits(index_common_loops))]
+loops_BT549_common <- gi_BT549[unique(subjectHits(index_common_loops))]
+#这段代码的目的是确保在相同的回路中，第一个锚点和第二个锚点是相同的。具体步骤如下：
+#首先检查 index_common_loops 的长度是否为 0。如果是 0，说明没有重叠的回路，无需进行后续的检查。
+#如果 index_common_loops 的长度不为 0，即存在重叠的回路：
+#使用 findOverlaps() 函数计算 gi_HMEC 和 gi_BT549 中重叠回路的第一个锚点和第二个锚点之间的重叠。
+#检查第一个锚点和第二个锚点之间的重叠的索引是否相同。这里使用 stopifnot() 函数来确保这两个重叠的索引相等，如果不相等，则会抛出一个错误。
+#如果第一步和第二步都通过了，说明重叠的回路中的第一个锚点和第二个锚点是相同的。然后从 gi_HMEC 和 gi_BT549 中提取出这些相同的回路，并存储在 loops_HMEC_common 和 loops_BT549_common 中
+#前两步都是检验，实际没有进行数据操作
+
+# HMEC unique - green, 0,255,0
+bedpe_HMEC_unique <- toBEDPE(mtx_selected = as.data.frame(loops_HMEC_unique), col = "0,255,0", condition = "HMEC")
+fwrite(bedpe_HMEC_unique, file = fileNameOut1.1, quote = FALSE, sep = "\t", row.names = FALSE)
+# BT549 unique - red, 255,0,0
+bedpe_BT549_unique <- toBEDPE(mtx_selected = as.data.frame(loops_BT549_unique), col = "255,0,0", condition = "BT549")
+fwrite(bedpe_BT549_unique, file = fileNameOut1.2, quote = FALSE, sep = "\t", row.names = FALSE)
+# Common - blue, 0,0,255
+# If common are present, add them to the combined, otherwise, combine just HMEC and BT549 specific
+# if (length(index_common_loops) != 0) {
+#   bedpe_XX_common <- toBEDPE(mtx_selected = as.data.frame(loops_XX_common), col = "0,0,255", condition = "Common") 
+#   fwrite(bedpe_XX_common, file = fileNameOut1.3, quote = FALSE, sep = "\t", row.names = FALSE)
+#   # Save combined, with common
+#   fwrite(rbind(bedpe_PR_unique, bedpe_CR_unique, bedpe_XX_common), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+# } else {
+#   # Save combined, without common
+#   fwrite(rbind(bedpe_PR_unique, bedpe_CR_unique), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+# }
+
+#如果loop之间有overlap，
+if (length(index_common_loops) != 0) {
+  # HMEC common
+  bedpe_HMEC_common <- toBEDPE(mtx_selected = as.data.frame(loops_HMEC_common), col = "0,0,255", condition = "Common HMEC") 
+  fwrite(bedpe_HMEC_common, file = fileNameOut1.3, quote = FALSE, sep = "\t", row.names = FALSE)
+  # BT549 common
+  bedpe_BT549_common <- toBEDPE(mtx_selected = as.data.frame(loops_BT549_common), col = "0,0,255", condition = "Common BT549") 
+  fwrite(bedpe_BT549_common, file = fileNameOut1.4, quote = FALSE, sep = "\t", row.names = FALSE)
+  # Save combined, with common将 HMEC 和 BT549 的独特loop以及公共loop合并，然后将合并结果写入文件 fileNameOut1.5 中
+  fwrite(rbind(bedpe_HMEC_unique, bedpe_BT549_unique, bedpe_HMEC_common, bedpe_BT549_common), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+} else {
+  # Save combined, without common如果不存在公共loop重叠，则直接将 HMEC 和 BT549 的独特loop合并，然后将合并结果写入文件 fileNameOut1.5 中
+  fwrite(rbind(bedpe_HMEC_unique, bedpe_BT549_unique), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+}
+
+# Save statistics主要是loop数目，主要就是length
+fwrite(list("Loops HMEC all count", length(gi_HMEC)), file = fileNameOut3, append = TRUE)
+fwrite(list("Loops BT549 all count", length(gi_BT549)), file = fileNameOut3, append = TRUE)
+fwrite(list("Loops HMEC unique count", length(loops_HMEC_unique)), file = fileNameOut3, append = TRUE)
+fwrite(list("Loops BT549 unique count", length(loops_BT549_unique)), file = fileNameOut3, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(list("Loops HMEC common count", length(loops_HMEC_common)), file = fileNameOut3, append = TRUE)
+  fwrite(list("Loops BT549 common count", length(loops_BT549_common)), file = fileNameOut3, append = TRUE)
+}
+# Width summary调用函数width_summary，统计loop一些数据信息
+fwrite(width_summary("Loops HMEC all width", gi_HMEC), file = fileNameOut3, append = TRUE)
+fwrite(width_summary("Loops BT549 all width", gi_BT549), file = fileNameOut3, append = TRUE)
+fwrite(width_summary("Loops HMEC unique width", loops_HMEC_unique), file = fileNameOut3, append = TRUE)
+fwrite(width_summary("Loops BT549 unique width", loops_BT549_unique), file = fileNameOut3, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(width_summary("Loops HMEC common width", loops_HMEC_common), file = fileNameOut3, append = TRUE)
+  fwrite(width_summary("Loops BT549 common width", loops_BT549_common), file = fileNameOut3, append = TRUE)
+}
+# Difference analysis，同样调用前面定义的width_difference函数，进行loop宽度的差异分析
+fwrite(list("HMEC all vs. BT549 all width difference", width_difference(gi_HMEC, gi_BT549)), file = fileNameOut3, append = TRUE)
+fwrite(list("HMEC unique vs. BT549 unique width difference", width_difference(loops_HMEC_unique, loops_BT549_unique)), file = fileNameOut3, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(list("HMEC unique vs. HMEC common width difference", width_difference(loops_HMEC_unique, loops_HMEC_common)), file = fileNameOut3, append = TRUE)
+  fwrite(list("BT549 unique vs. BT549 common width difference", width_difference(loops_BT549_unique, loops_BT549_common)), file = fileNameOut3, append = TRUE)
+}
+
+
+
+
+
+
+
+
+#下面是HCC70的
+index_common_loops <- findOverlaps(gi_HMEC, gi_HCC70, type = overlap_type) 
+loops_HMEC_unique <- gi_HMEC[setdiff(1:length(gi_HMEC), unique(queryHits(index_common_loops)))]
+loops_HCC70_unique <- gi_HCC70[setdiff(1:length(gi_HCC70), unique(subjectHits(index_common_loops)))]
+
+if (length(index_common_loops) != 0) {
+  overlap_common_loops1 <- findOverlaps(anchorOne(gi_HMEC[queryHits(index_common_loops)]), anchorOne(gi_HCC70[subjectHits(index_common_loops)]), type=overlap_type)
+  overlap_common_loops2 <- findOverlaps(anchorTwo(gi_HMEC[queryHits(index_common_loops)]), anchorTwo(gi_HCC70[subjectHits(index_common_loops)]), type=overlap_type)
+  stopifnot(all.equal(unique(sort(queryHits(overlap_common_loops1))),
+                      unique(sort(subjectHits(overlap_common_loops1)))) &
+            all.equal(unique(sort(queryHits(overlap_common_loops2))), 
+                      unique(sort(subjectHits(overlap_common_loops2)))))
+  # stopifnot(all.equal(anchorOne(gi_PR[queryHits(index_common_loops)]), anchorOne(gi_CR[subjectHits(index_common_loops)]))  & 
+  #   all.equal(anchorTwo(gi_PR[queryHits(index_common_loops)]), anchorTwo(gi_CR[subjectHits(index_common_loops)]))) 
+}
+loops_HMEC_common <- gi_HMEC[unique(queryHits(index_common_loops))]
+loops_HCC70_common <- gi_HCC70[unique(subjectHits(index_common_loops))]
+
+# HMEC unique - green, 0,255,0
+bedpe_HMEC_unique <- toBEDPE(mtx_selected = as.data.frame(loops_HMEC_unique), col = "0,255,0", condition = "HMEC")
+fwrite(bedpe_HMEC_unique, file = fileNameOut4.1, quote = FALSE, sep = "\t", row.names = FALSE)
+# HCC70 unique - red, 255,0,0
+bedpe_HCC70_unique <- toBEDPE(mtx_selected = as.data.frame(loops_HCC70_unique), col = "255,0,0", condition = "HCC70")
+fwrite(bedpe_HCC70_unique, file = fileNameOut4.2, quote = FALSE, sep = "\t", row.names = FALSE)
+# Common - blue, 0,0,255
+# If common are present, add them to the combined, otherwise, combine just HMEC and HCC70 specific
+# if (length(index_common_loops) != 0) {
+#   bedpe_XX_common <- toBEDPE(mtx_selected = as.data.frame(loops_XX_common), col = "0,0,255", condition = "Common") 
+#   fwrite(bedpe_XX_common, file = fileNameOut1.3, quote = FALSE, sep = "\t", row.names = FALSE)
+#   # Save combined, with common
+#   fwrite(rbind(bedpe_PR_unique, bedpe_CR_unique, bedpe_XX_common), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+# } else {
+#   # Save combined, without common
+#   fwrite(rbind(bedpe_PR_unique, bedpe_CR_unique), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+# }
+
+if (length(index_common_loops) != 0) {
+  # HMEC common
+  bedpe_HMEC_common <- toBEDPE(mtx_selected = as.data.frame(loops_HMEC_common), col = "0,0,255", condition = "Common HMEC") 
+  fwrite(bedpe_HMEC_common, file = fileNameOut4.3, quote = FALSE, sep = "\t", row.names = FALSE)
+  # HCC70 common
+  bedpe_HCC70_common <- toBEDPE(mtx_selected = as.data.frame(loops_HCC70_common), col = "0,0,255", condition = "Common HCC70") 
+  fwrite(bedpe_HCC70_common, file = fileNameOut4.4, quote = FALSE, sep = "\t", row.names = FALSE)
+  # Save combined, with common将 HMEC 和 HCC70 的独特loop以及公共loop合并，然后将合并结果写入文件 fileNameOut4.5 中
+  fwrite(rbind(bedpe_HMEC_unique, bedpe_HCC70_unique, bedpe_HMEC_common, bedpe_HCC70_common), file = fileNameOut4.5, quote = FALSE, sep = "\t", row.names = FALSE)
+} else {
+  # Save combined, without common如果不存在公共loop重叠，则直接将 HMEC 和 HCC70 的独特loop合并，然后将合并结果写入文件 fileNameOut4.5 中
+  fwrite(rbind(bedpe_HMEC_unique, bedpe_HCC70_unique), file = fileNameOut4.5, quote = FALSE, sep = "\t", row.names = FALSE)
+}
+
+# Save statistics主要是loop数目，主要就是length
+fwrite(list("Loops HMEC all count", length(gi_HMEC)), file = fileNameOut6, append = TRUE)
+fwrite(list("Loops HCC70 all count", length(gi_HCC70)), file = fileNameOut6, append = TRUE)
+fwrite(list("Loops HMEC unique count", length(loops_HMEC_unique)), file = fileNameOut6, append = TRUE)
+fwrite(list("Loops HCC70 unique count", length(loops_HCC70_unique)), file = fileNameOut6, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(list("Loops HMEC common count", length(loops_HMEC_common)), file = fileNameOut6, append = TRUE)
+  fwrite(list("Loops HCC70 common count", length(loops_HCC70_common)), file = fileNameOut6, append = TRUE)
+}
+# Width summary调用函数width_summary，统计loop一些数据信息
+fwrite(width_summary("Loops HMEC all width", gi_HMEC), file = fileNameOut6, append = TRUE)
+fwrite(width_summary("Loops HCC70 all width", gi_HCC70), file = fileNameOut6, append = TRUE)
+fwrite(width_summary("Loops HMEC unique width", loops_HMEC_unique), file = fileNameOut6, append = TRUE)
+fwrite(width_summary("Loops HCC70 unique width", loops_HCC70_unique), file = fileNameOut6, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(width_summary("Loops HMEC common width", loops_HMEC_common), file = fileNameOut6, append = TRUE)
+  fwrite(width_summary("Loops HCC70 common width", loops_HCC70_common), file = fileNameOut6, append = TRUE)
+}
+# Difference analysis，同样调用前面定义的width_difference函数，进行loop宽度的差异分析
+fwrite(list("HMEC all vs. HCC70 all width difference", width_difference(gi_HMEC, gi_HCC70)), file = fileNameOut6, append = TRUE)
+fwrite(list("HMEC unique vs. HCC70 unique width difference", width_difference(loops_HMEC_unique, loops_HCC70_unique)), file = fileNameOut6, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(list("HMEC unique vs. HMEC common width difference", width_difference(loops_HMEC_unique, loops_HMEC_common)), file = fileNameOut6, append = TRUE)
+  fwrite(list("HCC70 unique vs. HCC70 common width difference", width_difference(loops_HCC70_unique, loops_HCC70_common)), file = fileNameOut6, append = TRUE)
+}
+
+
+
+ 
+
+
+
+
+#下面是MB231的
+index_common_loops <- findOverlaps(gi_HMEC, gi_MB231, type = overlap_type) 
+loops_HMEC_unique <- gi_HMEC[setdiff(1:length(gi_HMEC), unique(queryHits(index_common_loops)))]
+loops_MB231_unique <- gi_MB231[setdiff(1:length(gi_MB231), unique(subjectHits(index_common_loops)))]
+
+if (length(index_common_loops) != 0) {
+  overlap_common_loops1 <- findOverlaps(anchorOne(gi_HMEC[queryHits(index_common_loops)]), anchorOne(gi_MB231[subjectHits(index_common_loops)]), type=overlap_type)
+  overlap_common_loops2 <- findOverlaps(anchorTwo(gi_HMEC[queryHits(index_common_loops)]), anchorTwo(gi_MB231[subjectHits(index_common_loops)]), type=overlap_type)
+  stopifnot(all.equal(unique(sort(queryHits(overlap_common_loops1))),
+                      unique(sort(subjectHits(overlap_common_loops1)))) &
+            all.equal(unique(sort(queryHits(overlap_common_loops2))), 
+                      unique(sort(subjectHits(overlap_common_loops2)))))
+  # stopifnot(all.equal(anchorOne(gi_PR[queryHits(index_common_loops)]), anchorOne(gi_CR[subjectHits(index_common_loops)]))  & 
+  #   all.equal(anchorTwo(gi_PR[queryHits(index_common_loops)]), anchorTwo(gi_CR[subjectHits(index_common_loops)]))) 
+}
+loops_HMEC_common <- gi_HMEC[unique(queryHits(index_common_loops))]
+loops_MB231_common <- gi_MB231[unique(subjectHits(index_common_loops))]
+
+# HMEC unique - green, 0,255,0
+bedpe_HMEC_unique <- toBEDPE(mtx_selected = as.data.frame(loops_HMEC_unique), col = "0,255,0", condition = "HMEC")
+fwrite(bedpe_HMEC_unique, file = fileNameOut7.1, quote = FALSE, sep = "\t", row.names = FALSE)
+# MB231 unique - red, 255,0,0
+bedpe_MB231_unique <- toBEDPE(mtx_selected = as.data.frame(loops_MB231_unique), col = "255,0,0", condition = "MB231")
+fwrite(bedpe_MB231_unique, file = fileNameOut7.2, quote = FALSE, sep = "\t", row.names = FALSE)
+# Common - blue, 0,0,255
+# If common are present, add them to the combined, otherwise, combine just HMEC and MB231 specific
+# if (length(index_common_loops) != 0) {
+#   bedpe_XX_common <- toBEDPE(mtx_selected = as.data.frame(loops_XX_common), col = "0,0,255", condition = "Common") 
+#   fwrite(bedpe_XX_common, file = fileNameOut1.3, quote = FALSE, sep = "\t", row.names = FALSE)
+#   # Save combined, with common
+#   fwrite(rbind(bedpe_PR_unique, bedpe_CR_unique, bedpe_XX_common), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+# } else {
+#   # Save combined, without common
+#   fwrite(rbind(bedpe_PR_unique, bedpe_CR_unique), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+# }
+
+if (length(index_common_loops) != 0) {
+  # HMEC common
+  bedpe_HMEC_common <- toBEDPE(mtx_selected = as.data.frame(loops_HMEC_common), col = "0,0,255", condition = "Common HMEC") 
+  fwrite(bedpe_HMEC_common, file = fileNameOut7.3, quote = FALSE, sep = "\t", row.names = FALSE)
+  # MB231 common
+  bedpe_MB231_common <- toBEDPE(mtx_selected = as.data.frame(loops_MB231_common), col = "0,0,255", condition = "Common MB231") 
+  fwrite(bedpe_MB231_common, file = fileNameOut7.4, quote = FALSE, sep = "\t", row.names = FALSE)
+  # Save combined, with common将 HMEC 和 MB231 的独特loop以及公共loop合并，然后将合并结果写入文件 fileNameOut1.5 中
+  fwrite(rbind(bedpe_HMEC_unique, bedpe_MB231_unique, bedpe_HMEC_common, bedpe_MB231_common), file = fileNameOut7.5, quote = FALSE, sep = "\t", row.names = FALSE)
+} else {
+  # Save combined, without common如果不存在公共loop重叠，则直接将 HMEC 和 MB231 的独特loop合并，然后将合并结果写入文件 fileNameOut1.5 中
+  fwrite(rbind(bedpe_HMEC_unique, bedpe_MB231_unique), file = fileNameOut7.5, quote = FALSE, sep = "\t", row.names = FALSE)
+}
+
+# Save statistics主要是loop数目，主要就是length
+fwrite(list("Loops HMEC all count", length(gi_HMEC)), file = fileNameOut9, append = TRUE)
+fwrite(list("Loops MB231 all count", length(gi_MB231)), file = fileNameOut9, append = TRUE)
+fwrite(list("Loops HMEC unique count", length(loops_HMEC_unique)), file = fileNameOut9, append = TRUE)
+fwrite(list("Loops MB231 unique count", length(loops_MB231_unique)), file = fileNameOut9, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(list("Loops HMEC common count", length(loops_HMEC_common)), file = fileNameOut9, append = TRUE)
+  fwrite(list("Loops MB231 common count", length(loops_MB231_common)), file = fileNameOut9, append = TRUE)
+}
+# Width summary调用函数width_summary，统计loop一些数据信息
+fwrite(width_summary("Loops HMEC all width", gi_HMEC), file = fileNameOut9, append = TRUE)
+fwrite(width_summary("Loops MB231 all width", gi_MB231), file = fileNameOut9, append = TRUE)
+fwrite(width_summary("Loops HMEC unique width", loops_HMEC_unique), file = fileNameOut9, append = TRUE)
+fwrite(width_summary("Loops MB231 unique width", loops_MB231_unique), file = fileNameOut9, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(width_summary("Loops HMEC common width", loops_HMEC_common), file = fileNameOut9, append = TRUE)
+  fwrite(width_summary("Loops MB231 common width", loops_MB231_common), file = fileNameOut9, append = TRUE)
+}
+# Difference analysis，同样调用前面定义的width_difference函数，进行loop宽度的差异分析
+fwrite(list("HMEC all vs. MB231 all width difference", width_difference(gi_HMEC, gi_MB231)), file = fileNameOut9, append = TRUE)
+fwrite(list("HMEC unique vs. MB231 unique width difference", width_difference(loops_HMEC_unique, loops_MB231_unique)), file = fileNameOut9, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(list("HMEC unique vs. HMEC common width difference", width_difference(loops_HMEC_unique, loops_HMEC_common)), file = fileNameOut9, append = TRUE)
+  fwrite(list("MB231 unique vs. MB231 common width difference", width_difference(loops_MB231_unique, loops_MB231_common)), file = fileNameOut9, append = TRUE)
+}
+
+```
+
+# Separate anchors 主要处理收集bed文件
+
+BED files are sorted by anchor interaction frequency, most frequently interacting on top
+
+下面所展示的实际上就是reduce前后
+```{r}
+all_anchors_HMEC #32860_18119，实际上就是loop数目的2倍
+all_anchors_BT549 #22726_14199
+index_common_anchors #12199
+
+anchors_HMEC_common <- all_anchors_HMEC[unique(queryHits(index_common_anchors))]  #11677,主要query是12199是一致的common，但是unique之后11677
+anchors_BT549_common <- all_anchors_BT549[unique(subjectHits(index_common_anchors))] 
+#query还是12199，unique之后就是11609
+
+anchors_HMEC_common #24063_11677
+anchors_BT549_common #19775_11609
+anchors_HMEC_common <- subsetByOverlaps(full_anchors_HMEC, anchors_HMEC_common)
+anchors_BT549_common <- subsetByOverlaps(full_anchors_BT549, anchors_BT549_common)
+
+#从 full_anchors_HMEC 和 full_anchors_BT549 中选择与 anchors_HMEC_unique 和 anchors_BT549_unique 重叠的区域
+#我觉得应该是reduce之后便于寻找overlap，但是取完common的overlap之后如果要进一步反映射回去，实际上可以将该区域直接与原始的anchor做一个overlap，获得数据实际上上就是overlap的数据在原始anchor中的呈现，而且是非reduce的
+
+reduce(anchors_HMEC_common) #11677，实际上就是前面先reduce寻找overlap之后的数据
+reduce(anchors_BT549_common) #11609,但是数目还是不一致
+
+#所以在anchor图中呈现的实际上就是reduce前的共有的anchor区域，所以不一致，难能说明什么
+
+```
+
+```{r separate_anchors}
+## Get unique anchors with interaction frequency counts
+#对锚点的合并、排序和计算交互频率,使用 countOverlaps() 函数来计算每个锚点与自身的重叠次数，即锚点的自相交。这个自相交的数量实际上代表了每个锚点的交互频率
+# HMEC
+# Combine first and second anchors
+all_anchors_HMEC <- c(anchors(gi_HMEC)$first, anchors(gi_HMEC)$second) %>% sort() 
+# Count overlap with themselves = frequency
+all_anchors_HMEC$freq <- countOverlaps(all_anchors_HMEC, all_anchors_HMEC, type = overlap_type) 
+full_anchors_HMEC <- all_anchors_HMEC # Unreduced anchors
+# Reduce adjacent anchors将相邻的区域合并为一个更大的区域，以便覆盖所有相邻的区域。这个函数通常在处理基因组数据时用于简化和优化区域的表示
+all_anchors_HMEC <- reduce(all_anchors_HMEC)   
+
+# BT549
+# Combine first and second anchors
+all_anchors_BT549 <- c(anchors(gi_BT549)$first, anchors(gi_BT549)$second) %>% sort() 
+# Count overlap with themselves = frequency
+all_anchors_BT549$freq <- countOverlaps(all_anchors_BT549, all_anchors_BT549, type = overlap_type) 
+full_anchors_BT549 <- all_anchors_BT549 # Unreduced anchors
+# Reduce adjacent anchors
+all_anchors_BT549 <- reduce(all_anchors_BT549)
+
+# Selected region, for testing
+# gr_selected <- GRanges(seqnames="chr7", ranges = IRanges(20455284, 20737829))
+# all_anchors_PR <- subsetByOverlaps(all_anchors_PR, gr_selected)
+# all_anchors_CR <- subsetByOverlaps(all_anchors_CR, gr_selected)
+
+## Indexes for overlapping regions
+index_common_anchors <- findOverlaps(all_anchors_HMEC, all_anchors_BT549, type = overlap_type)
+
+## Indexes for unique regions差集，特有anchor
+index_anchors_HMEC_unique <- setdiff(1:length(all_anchors_HMEC), queryHits(index_common_anchors))
+index_anchors_BT549_unique <- setdiff(1:length(all_anchors_BT549), subjectHits(index_common_anchors))
+# HMEC      
+anchors_HMEC_unique <- all_anchors_HMEC[index_anchors_HMEC_unique] # All unique anchors
+# anchors_PR_unique <- anchors_PR_unique[order(anchors_PR_unique$freq, decreasing = TRUE)] # Most interacting on top
+# BT549 
+anchors_BT549_unique <- all_anchors_BT549[index_anchors_BT549_unique] # All unique anchors
+# anchors_CR_unique <- anchors_CR_unique[order(anchors_CR_unique$freq, decreasing = TRUE)] # Most interacting on top
+ 
+# All common anchors共有anchor  
+anchors_HMEC_common <- all_anchors_HMEC[unique(queryHits(index_common_anchors))]
+anchors_BT549_common <- all_anchors_BT549[unique(subjectHits(index_common_anchors))]
+ 
+# Restore the original anchor coordinates
+#根据一组参考区域（在这里是 full_anchors_HMEC）将另一组区域（在这里是 anchors_HMEC_unique）的坐标信息映射回原始的坐标空间，将独有的锚点坐标映射回了原始的坐标空间，使得我们可以在原始数据集中准确地定位这些锚点
+anchors_HMEC_unique <- subsetByOverlaps(full_anchors_HMEC, anchors_HMEC_unique)
+anchors_BT549_unique <- subsetByOverlaps(full_anchors_BT549, anchors_BT549_unique)
+anchors_HMEC_common <- subsetByOverlaps(full_anchors_HMEC, anchors_HMEC_common)
+anchors_BT549_common <- subsetByOverlaps(full_anchors_BT549, anchors_BT549_common)
+
+# Check, should be equal reduced. Don't check if no overlap, length(index_common_loops) is 0
+# if (length(index_common_anchors) != 0) {
+#   stopifnot(all.equal(reduce(anchors_PR_common), reduce(anchors_CR_common)))
+# }
+# # Check, common regions should be equal. Don't check if no overlap, length(index_common_loops) is 0
+# if (length(index_common_anchors) != 0) {
+#   # Overlap between reduced common regions should have the same indices
+#   overlap_common_anchors <- findOverlaps(reduce(anchors_PR_common),
+#                                          reduce(anchors_CR_common),
+#                                          type = overlap_type)
+#   stopifnot(all.equal(unique(sort(queryHits(overlap_common_anchors))), unique(sort(subjectHits(overlap_common_anchors)))))
+# 
+#     # stopifnot(all.equal(granges(all_anchors_PR[queryHits(index_common_anchors)]), granges(all_anchors_CR[subjectHits(index_common_anchors)])))
+# }
+
+# HMEC unique - green, 0,255,0
+bed_HMEC_unique <- toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = TRUE)
+fwrite(bed_HMEC_unique, file = fileNameOut2.1, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# BT549 unique - red, 255,0,0
+bed_BT549_unique <- toBED(mtx_selected = as.data.frame(anchors_BT549_unique), col = "255,0,0", condition = "BT549", header = TRUE)
+fwrite(bed_BT549_unique, file = fileNameOut2.2, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# Common - blue, 0,0,255
+# If common are present, add them to the combined, otherwise, combine just HMEC and BT549 specific
+if (length(index_common_anchors) != 0) {
+  # HMEC common
+  bed_HMEC_common <- toBED(mtx_selected = as.data.frame(anchors_HMEC_common), col = "0,0,255", condition = "Common HMEC", header = TRUE) 
+  fwrite(bed_HMEC_common, file = fileNameOut2.3, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+  # BT549 common
+  bed_BT549_common <- toBED(mtx_selected = as.data.frame(anchors_BT549_common), col = "0,0,255", condition = "Common BT549", header = TRUE) 
+  fwrite(bed_BT549_common, file = fileNameOut2.4, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+
+  # Create combined, with common
+  bed_combined <- rbind(toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_BT549_unique), col = "255,0,0", condition = "BT549", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_HMEC_common), col = "0,0,255", condition = "Common HMEC", header = FALSE) ,
+                        toBED(mtx_selected = as.data.frame(anchors_BT549_common), col = "0,0,255", condition = "Common BT549", header = FALSE))
+  # Sort by frequency
+  bed_combined <- bed_combined[order(bed_combined$score, decreasing = TRUE), ]
+  # Append header
+  bed_combined <- rbind(c("track itemRgb=On", rep("", ncol(bed_combined) - 1)), bed_combined)
+  # Save combined
+  fwrite(bed_combined, file = fileNameOut2.5, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+} else {
+  # Create combined, without common
+  bed_combined <- rbind(toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_BT549_unique), col = "255,0,0", condition = "BT549", header = FALSE))
+  # Sort by frequency
+  bed_combined <- bed_combined[order(bed_combined$score, decreasing = TRUE), ]
+  # Append header
+  bed_combined <- rbind(c("track itemRgb=On", rep("", ncol(bed_combined) - 1)), bed_combined)
+  # Save combined
+  fwrite(bed_combined, file = fileNameOut2.5, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+}
+
+# Save statistics，同上
+fwrite(list("Anchors HMEC all count", length(full_anchors_HMEC)), file = fileNameOut3, append = TRUE)
+fwrite(list("Anchors BT549 all count", length(full_anchors_BT549)), file = fileNameOut3, append = TRUE)
+fwrite(list("Anchors HMEC unique count", length(anchors_HMEC_unique)), file = fileNameOut3, append = TRUE)
+fwrite(list("Anchors BT549 unique count", length(anchors_BT549_unique)), file = fileNameOut3, append = TRUE)
+fwrite(list("Anchors HMEC common count", length(anchors_HMEC_common)), file = fileNameOut3, append = TRUE)
+fwrite(list("Anchors BT549 common count", length(anchors_BT549_common)), file = fileNameOut3, append = TRUE)
+
+
+
+
+
+
+
+
+########################下面是HCC70
+# HMEC
+# Combine first and second anchors
+all_anchors_HMEC <- c(anchors(gi_HMEC)$first, anchors(gi_HMEC)$second) %>% sort() 
+# Count overlap with themselves = frequency
+all_anchors_HMEC$freq <- countOverlaps(all_anchors_HMEC, all_anchors_HMEC, type = overlap_type) 
+full_anchors_HMEC <- all_anchors_HMEC # Unreduced anchors
+# Reduce adjacent anchors将相邻的区域合并为一个更大的区域，以便覆盖所有相邻的区域。这个函数通常在处理基因组数据时用于简化和优化区域的表示
+all_anchors_HMEC <- reduce(all_anchors_HMEC)
+
+# HCC70
+# Combine first and second anchors
+all_anchors_HCC70 <- c(anchors(gi_HCC70)$first, anchors(gi_HCC70)$second) %>% sort() 
+# Count overlap with themselves = frequency
+all_anchors_HCC70$freq <- countOverlaps(all_anchors_HCC70, all_anchors_HCC70, type = overlap_type) 
+full_anchors_HCC70 <- all_anchors_HCC70 # Unreduced anchors
+# Reduce adjacent anchors
+all_anchors_HCC70 <- reduce(all_anchors_HCC70)
+
+## Indexes for overlapping regions
+index_common_anchors <- findOverlaps(all_anchors_HMEC, all_anchors_HCC70, type = overlap_type)
+
+## Indexes for unique regions差集，特有anchor
+index_anchors_HMEC_unique <- setdiff(1:length(all_anchors_HMEC), queryHits(index_common_anchors))
+index_anchors_HCC70_unique <- setdiff(1:length(all_anchors_HCC70), subjectHits(index_common_anchors))
+# HMEC
+anchors_HMEC_unique <- all_anchors_HMEC[index_anchors_HMEC_unique] # All unique anchors
+# anchors_PR_unique <- anchors_PR_unique[order(anchors_PR_unique$freq, decreasing = TRUE)] # Most interacting on top
+# HCC70
+anchors_HCC70_unique <- all_anchors_HCC70[index_anchors_HCC70_unique] # All unique anchors
+# anchors_CR_unique <- anchors_CR_unique[order(anchors_CR_unique$freq, decreasing = TRUE)] # Most interacting on top
+
+# All common anchors共有anchor
+anchors_HMEC_common <- all_anchors_HMEC[unique(queryHits(index_common_anchors))]
+anchors_HCC70_common <- all_anchors_HCC70[unique(subjectHits(index_common_anchors))]
+
+# Restore the original anchor coordinates
+#根据一组参考区域（在这里是 full_anchors_HMEC）将另一组区域（在这里是 anchors_HMEC_unique）的坐标信息映射回原始的坐标空间，将独有的锚点坐标映射回了原始的坐标空间，使得我们可以在原始数据集中准确地定位这些锚点
+anchors_HMEC_unique <- subsetByOverlaps(full_anchors_HMEC, anchors_HMEC_unique)
+anchors_HCC70_unique <- subsetByOverlaps(full_anchors_HCC70, anchors_HCC70_unique)
+anchors_HMEC_common <- subsetByOverlaps(full_anchors_HMEC, anchors_HMEC_common)
+anchors_HCC70_common <- subsetByOverlaps(full_anchors_HCC70, anchors_HCC70_common)
+
+# HMEC unique - green, 0,255,0
+bed_HMEC_unique <- toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = TRUE)
+fwrite(bed_HMEC_unique, file = fileNameOut5.1, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# HCC70 unique - red, 255,0,0
+bed_HCC70_unique <- toBED(mtx_selected = as.data.frame(anchors_HCC70_unique), col = "255,0,0", condition = "HCC70", header = TRUE)
+fwrite(bed_HCC70_unique, file = fileNameOut5.2, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# Common - blue, 0,0,255
+# If common are present, add them to the combined, otherwise, combine just HMEC and HCC70 specific
+if (length(index_common_anchors) != 0) {
+  # HMEC common
+  bed_HMEC_common <- toBED(mtx_selected = as.data.frame(anchors_HMEC_common), col = "0,0,255", condition = "Common HMEC", header = TRUE) 
+  fwrite(bed_HMEC_common, file = fileNameOut5.3, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+  # HCC70 common
+  bed_HCC70_common <- toBED(mtx_selected = as.data.frame(anchors_HCC70_common), col = "0,0,255", condition = "Common HCC70", header = TRUE) 
+  fwrite(bed_HCC70_common, file = fileNameOut5.4, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+
+  # Create combined, with common
+  bed_combined <- rbind(toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_HCC70_unique), col = "255,0,0", condition = "HCC70", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_HMEC_common), col = "0,0,255", condition = "Common HMEC", header = FALSE) ,
+                        toBED(mtx_selected = as.data.frame(anchors_HCC70_common), col = "0,0,255", condition = "Common HCC70", header = FALSE))
+  # Sort by frequency
+  bed_combined <- bed_combined[order(bed_combined$score, decreasing = TRUE), ]
+  # Append header
+  bed_combined <- rbind(c("track itemRgb=On", rep("", ncol(bed_combined) - 1)), bed_combined)
+  # Save combined
+  fwrite(bed_combined, file = fileNameOut5.5, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+} else {
+  # Create combined, without common
+  bed_combined <- rbind(toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_HCC70_unique), col = "255,0,0", condition = "HCC70", header = FALSE))
+  # Sort by frequency
+  bed_combined <- bed_combined[order(bed_combined$score, decreasing = TRUE), ]
+  # Append header
+  bed_combined <- rbind(c("track itemRgb=On", rep("", ncol(bed_combined) - 1)), bed_combined)
+  # Save combined
+  fwrite(bed_combined, file = fileNameOut5.5, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+}
+
+# Save statistics，同上
+fwrite(list("Anchors HMEC all count", length(full_anchors_HMEC)), file = fileNameOut6, append = TRUE)
+fwrite(list("Anchors HCC70 all count", length(full_anchors_HCC70)), file = fileNameOut6, append = TRUE)
+fwrite(list("Anchors HMEC unique count", length(anchors_HMEC_unique)), file = fileNameOut6, append = TRUE)
+fwrite(list("Anchors HCC70 unique count", length(anchors_HCC70_unique)), file = fileNameOut6, append = TRUE)
+fwrite(list("Anchors HMEC common count", length(anchors_HMEC_common)), file = fileNameOut6, append = TRUE)
+fwrite(list("Anchors HCC70 common count", length(anchors_HCC70_common)), file = fileNameOut6, append = TRUE)
+
+
+
+
+
+
+####################################下面是MB231
+# HMEC
+# Combine first and second anchors
+all_anchors_HMEC <- c(anchors(gi_HMEC)$first, anchors(gi_HMEC)$second) %>% sort() 
+# Count overlap with themselves = frequency
+all_anchors_HMEC$freq <- countOverlaps(all_anchors_HMEC, all_anchors_HMEC, type = overlap_type) 
+full_anchors_HMEC <- all_anchors_HMEC # Unreduced anchors
+# Reduce adjacent anchors将相邻的区域合并为一个更大的区域，以便覆盖所有相邻的区域。这个函数通常在处理基因组数据时用于简化和优化区域的表示
+all_anchors_HMEC <- reduce(all_anchors_HMEC)
+
+# MB231
+# Combine first and second anchors
+all_anchors_MB231 <- c(anchors(gi_MB231)$first, anchors(gi_MB231)$second) %>% sort() 
+# Count overlap with themselves = frequency
+all_anchors_MB231$freq <- countOverlaps(all_anchors_MB231, all_anchors_MB231, type = overlap_type) 
+full_anchors_MB231 <- all_anchors_MB231 # Unreduced anchors
+# Reduce adjacent anchors
+all_anchors_MB231 <- reduce(all_anchors_MB231)
+
+## Indexes for overlapping regions
+index_common_anchors <- findOverlaps(all_anchors_HMEC, all_anchors_MB231, type = overlap_type)
+
+## Indexes for unique regions差集，特有anchor
+index_anchors_HMEC_unique <- setdiff(1:length(all_anchors_HMEC), queryHits(index_common_anchors))
+index_anchors_MB231_unique <- setdiff(1:length(all_anchors_MB231), subjectHits(index_common_anchors))
+# HMEC
+anchors_HMEC_unique <- all_anchors_HMEC[index_anchors_HMEC_unique] # All unique anchors
+# anchors_PR_unique <- anchors_PR_unique[order(anchors_PR_unique$freq, decreasing = TRUE)] # Most interacting on top
+# MB231
+anchors_MB231_unique <- all_anchors_MB231[index_anchors_MB231_unique] # All unique anchors
+# anchors_CR_unique <- anchors_CR_unique[order(anchors_CR_unique$freq, decreasing = TRUE)] # Most interacting on top
+
+# All common anchors共有anchor
+anchors_HMEC_common <- all_anchors_HMEC[unique(queryHits(index_common_anchors))]
+anchors_MB231_common <- all_anchors_MB231[unique(subjectHits(index_common_anchors))]
+
+# Restore the original anchor coordinates
+#根据一组参考区域（在这里是 full_anchors_HMEC）将另一组区域（在这里是 anchors_HMEC_unique）的坐标信息映射回原始的坐标空间，将独有的锚点坐标映射回了原始的坐标空间，使得我们可以在原始数据集中准确地定位这些锚点
+anchors_HMEC_unique <- subsetByOverlaps(full_anchors_HMEC, anchors_HMEC_unique)
+anchors_MB231_unique <- subsetByOverlaps(full_anchors_MB231, anchors_MB231_unique)
+anchors_HMEC_common <- subsetByOverlaps(full_anchors_HMEC, anchors_HMEC_common)
+anchors_MB231_common <- subsetByOverlaps(full_anchors_MB231, anchors_MB231_common)
+
+# HMEC unique - green, 0,255,0
+bed_HMEC_unique <- toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = TRUE)
+fwrite(bed_HMEC_unique, file = fileNameOut8.1, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# MB231 unique - red, 255,0,0
+bed_MB231_unique <- toBED(mtx_selected = as.data.frame(anchors_MB231_unique), col = "255,0,0", condition = "MB231", header = TRUE)
+fwrite(bed_MB231_unique, file = fileNameOut8.2, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# Common - blue, 0,0,255
+# If common are present, add them to the combined, otherwise, combine just HMEC and MB231 specific
+if (length(index_common_anchors) != 0) {
+  # HMEC common
+  bed_HMEC_common <- toBED(mtx_selected = as.data.frame(anchors_HMEC_common), col = "0,0,255", condition = "Common HMEC", header = TRUE) 
+  fwrite(bed_HMEC_common, file = fileNameOut8.3, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+  # MB231 common
+  bed_MB231_common <- toBED(mtx_selected = as.data.frame(anchors_MB231_common), col = "0,0,255", condition = "Common MB231", header = TRUE) 
+  fwrite(bed_MB231_common, file = fileNameOut8.4, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+
+  # Create combined, with common
+  bed_combined <- rbind(toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_MB231_unique), col = "255,0,0", condition = "MB231", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_HMEC_common), col = "0,0,255", condition = "Common HMEC", header = FALSE) ,
+                        toBED(mtx_selected = as.data.frame(anchors_MB231_common), col = "0,0,255", condition = "Common MB231", header = FALSE))
+  # Sort by frequency
+  bed_combined <- bed_combined[order(bed_combined$score, decreasing = TRUE), ]
+  # Append header
+  bed_combined <- rbind(c("track itemRgb=On", rep("", ncol(bed_combined) - 1)), bed_combined)
+  # Save combined
+  fwrite(bed_combined, file = fileNameOut8.5, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+} else {
+  # Create combined, without common
+  bed_combined <- rbind(toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_MB231_unique), col = "255,0,0", condition = "MB231", header = FALSE))
+  # Sort by frequency
+  bed_combined <- bed_combined[order(bed_combined$score, decreasing = TRUE), ]
+  # Append header
+  bed_combined <- rbind(c("track itemRgb=On", rep("", ncol(bed_combined) - 1)), bed_combined)
+  # Save combined
+  fwrite(bed_combined, file = fileNameOut8.5, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+}
+
+# Save statistics，同上
+fwrite(list("Anchors HMEC all count", length(full_anchors_HMEC)), file = fileNameOut9, append = TRUE)
+fwrite(list("Anchors MB231 all count", length(full_anchors_MB231)), file = fileNameOut9, append = TRUE)
+fwrite(list("Anchors HMEC unique count", length(anchors_HMEC_unique)), file = fileNameOut9, append = TRUE)
+fwrite(list("Anchors MB231 unique count", length(anchors_MB231_unique)), file = fileNameOut9, append = TRUE)
+fwrite(list("Anchors HMEC common count", length(anchors_HMEC_common)), file = fileNameOut9, append = TRUE)
+fwrite(list("Anchors MB231 common count", length(anchors_MB231_common)), file = fileNameOut9, append = TRUE)
+```
+
+# All loops
+
+```{r all_loops}
+# HMEC all - green, 0,255,0
+bedpe_HMEC_all <- toBEDPE(mtx_selected = as.data.frame(gi_HMEC), col = "0,255,0", condition = "HMEC all")
+fwrite(bedpe_HMEC_all, file = fileNameOut1.6, quote = FALSE, sep = "\t", row.names = FALSE)
+# BT549 all - red, 255,0,0
+bedpe_BT549_all <- toBEDPE(mtx_selected = as.data.frame(gi_BT549), col = "255,0,0", condition = "BT549 all")
+fwrite(bedpe_BT549_all, file = fileNameOut1.7, quote = FALSE, sep = "\t", row.names = FALSE)
+
+
+
+#下面是HCC70的
+bedpe_HMEC_all <- toBEDPE(mtx_selected = as.data.frame(gi_HMEC), col = "0,255,0", condition = "HMEC all")
+fwrite(bedpe_HMEC_all, file = fileNameOut4.6, quote = FALSE, sep = "\t", row.names = FALSE)
+# HCC70 all - red, 255,0,0
+bedpe_HCC70_all <- toBEDPE(mtx_selected = as.data.frame(gi_HCC70), col = "255,0,0", condition = "HCC70 all")
+fwrite(bedpe_HCC70_all, file = fileNameOut4.7, quote = FALSE, sep = "\t", row.names = FALSE)
+
+
+
+#下面是MB231的
+bedpe_HMEC_all <- toBEDPE(mtx_selected = as.data.frame(gi_HMEC), col = "0,255,0", condition = "HMEC all")
+fwrite(bedpe_HMEC_all, file = fileNameOut7.6, quote = FALSE, sep = "\t", row.names = FALSE)
+# MB231 all - red, 255,0,0
+bedpe_MB231_all <- toBEDPE(mtx_selected = as.data.frame(gi_MB231), col = "255,0,0", condition = "MB231 all")
+fwrite(bedpe_MB231_all, file = fileNameOut7.7, quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+# All anchors
+
+```{r all_anchors}
+# HMEC all - green, 0,255,0
+bed_HMEC_all <- toBED(mtx_selected = as.data.frame(full_anchors_HMEC), col = "0,255,0", condition = "HMEC", header = TRUE)
+fwrite(bed_HMEC_all, file = fileNameOut2.6, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# BT549 all - red, 255,0,0
+bed_BT549_all <- toBED(mtx_selected = as.data.frame(full_anchors_BT549), col = "255,0,0", condition = "BT549", header = TRUE)
+fwrite(bed_BT549_all, file = fileNameOut2.7, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+
+
+
+#下面是HCC70的
+bed_HMEC_all <- toBED(mtx_selected = as.data.frame(full_anchors_HMEC), col = "0,255,0", condition = "HMEC", header = TRUE)
+fwrite(bed_HMEC_all, file = fileNameOut5.6, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# HCC70 all - red, 255,0,0
+bed_HCC70_all <- toBED(mtx_selected = as.data.frame(full_anchors_HCC70), col = "255,0,0", condition = "HCC70", header = TRUE)
+fwrite(bed_HCC70_all, file = fileNameOut5.7, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+
+
+#下面是MB231的
+bed_HMEC_all <- toBED(mtx_selected = as.data.frame(full_anchors_HMEC), col = "0,255,0", condition = "HMEC", header = TRUE)
+fwrite(bed_HMEC_all, file = fileNameOut8.6, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# MB231 all - red, 255,0,0
+bed_MB231_all <- toBED(mtx_selected = as.data.frame(full_anchors_MB231), col = "255,0,0", condition = "MB231", header = TRUE)
+fwrite(bed_MB231_all, file = fileNameOut8.7, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###########下面是处理TNBC合并之后的loop文件
+此处是选择将3个TNBC细胞系的loop合并，然后1-6列值相同的取其一，最后2列的值取mean，这样dup行只保留一个
+
+```{r}
+# 读取combined.tsv文件
+library(data.table)
+data <- fread("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/combined.tsv")
+
+# 添加新列，存储最后两列的值
+data[, c("FDR_mean", "DETECTION_SCALE_mean") := list(mean(FDR), mean(DETECTION_SCALE)), by = .(BIN1_CHR, BIN1_START, BIN1_END, BIN2_CHROMOSOME, BIN2_START, BIN2_END)]
+
+# 保留重复行中的第一个，并删除原来的FDR和DETECTION_SCALE列
+result <- unique(data, by = c("BIN1_CHR", "BIN1_START", "BIN1_END", "BIN2_CHROMOSOME", "BIN2_START", "BIN2_END"))
+final <- result[,c("BIN1_CHR", "BIN1_START", "BIN1_END", "BIN2_CHROMOSOME", "BIN2_START", "BIN2_END", "FDR_mean", "DETECTION_SCALE_mean")]
+
+names(final)[names(final) == "FDR_mean"] <- "FDR"
+names(final)[names(final) == "DETECTION_SCALE_mean"] <- "DETECTION_SCALE"
+
+# 保存结果到新文件
+write.table(final, "TNBC_10000.tsv", sep="\t", quote=FALSE, row.names=FALSE)
+```
+
+
+## Mustache
+事实上能够注意到下面的函数 mtx2GInteractions中其实提取的就是2个anchor的信息数据，所以并没有用上其他几列的数据
+
+```{r mustache, eval=FALSE}
+dir_data <- "/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result"
+
+#前面1-4用完了
+fileNameIn5 <- file.path(dir_data, paste0("HMEC_", res, ".tsv")) # HMEC
+fileNameIn6 <- file.path(dir_data, paste0("TNBC_", res, ".tsv")) # TNBC
+
+# Function to construct GInteractions
+# Should be modified for different data
+mtx2GInteractions <- function(fileNameIn = fileNameIn1, condition = "HMEC") {
+  # Load data
+  mtx <- read.table(fileNameIn, sep = "\t", header = TRUE)
+  #原来tsv文件列名是含有chr的，所以下面的paste0不用chr  
+  #使用 makeGRangesFromDataFrame() 函数将 gr1 和 gr2 转换为 GRanges 对象。在转换过程中，需要注意设置 seqinfo 参数，确保序列信息正确
+  gr1 <- data.frame(chr   = paste0(mtx[, 1]),  
+                    start = mtx[, 2],
+                    end   = mtx[, 3]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(paste0(mtx[, 1]), paste0(mtx[, 4]))))
+  gr2 <- data.frame(chr   = paste0(mtx[, 4]),
+                    start = mtx[, 5], 
+                    end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(c(paste0(mtx[, 1]), paste0(mtx[, 4]))))  
+   
+  # Domain GRanges overlapping centromeres 这里说明TAD分析过程中也可以使用该功能！！！！！！！！1
+  # gr  <- data.frame(chr   = mtx[, 1], 
+  #                   start = mtx[, 2], 
+  #                   end   = mtx[, 6]) %>% makeGRangesFromDataFrame(., seqinfo = unique(mtx[, 1]))
+  # gr_centromere  <- findOverlaps(gr,  hg19.UCSC.centromere, type = "any")
+  
+  #分别计算了 gr1 和 gr2 区域与着丝粒位置、端粒位置以及需排除的区域之间的重叠情况
+  gr1_centromere  <- findOverlaps(gr1,  hg19.UCSC.centromere, type = "any")
+  gr2_centromere  <- findOverlaps(gr2,  hg19.UCSC.centromere, type = "any") 
+  # Boundaries overlapping telomeres  
+  gr1_telomeres  <- findOverlaps(gr1, hg19.UCSC.telomere, type = "any")
+  gr2_telomeres  <- findOverlaps(gr2, hg19.UCSC.telomere, type = "any")
+  # Boundaries overlapping excludable regions 
+  gr1_exclude    <- findOverlaps(gr1, excludeGR.hg19, type = "any")
+  gr2_exclude    <- findOverlaps(gr2, excludeGR.hg19, type = "any")
+  # Index to exclude
+  #通过 queryHits() 函数从前面计算得到的重叠结果中提取索引，然后使用 unique() 函数去除重复的索引，并使用 sort() 函数对索引进行排序。这些索引代表了需要排除的区域的位置，下面是所有区域都排除
+  index_exclude  <- sort(unique(c(queryHits(gr1_centromere), queryHits(gr2_centromere), queryHits(gr1_telomeres), queryHits(gr2_telomeres), queryHits(gr1_exclude), queryHits(gr2_exclude))))
+  # Complement index to include 
+  #使用 seq() 函数生成一个从 1 到 gr1 区域长度的序列，然后使用 setdiff() 函数计算该序列与 index_exclude 的差集，得到的结果就是需要保留的区域的位置。这些位置被存储在 index_include 中
+  index_include  <- setdiff(seq(1:length(gr1)), index_exclude)
+  #选择 gr1 或 gr2 的长度来生成序列都是可以的，因为这两者应该是相同的长度（或者具有相同的区域数目）。因此，可以选择任意一个区域的长度来生成序列
+  
+  # GInteractions excluding selected boundaries,实际上就是筛选两个anchor鞍点
+  #基于选定的索引 index_include 筛选出需要保留的锚点，并构建 GInteractions 对象
+  gi <- GInteractions(gr1[index_include], gr2[index_include], mode = "strict")
+  # Construct name，为 GInteractions 对象的 name 属性赋值，构建锚点的名称。这里的名称由多个部分组成，包括条件、锚点宽度、FDR 值和 SCALE 值。锚点宽度是通过 calculateDistances() 函数计算得到的，FDR 值和 SCALE 值是从原始数据中提取得到的
+  gi$name <- paste(condition,
+                    paste("Width", calculateDistances(gi), sep = ":"),
+                    paste("FDR", formatC(mtx[index_include, 7], format = "e", digits = 2), sep = ":"),
+                    paste("SCALE", round(mtx[index_include, 8], digits = 2), sep = ":"), sep = "_")
+  return(gi)
+}
+#根据指定的索引筛选需要保留的锚点，并构建相应的 GInteractions 对象，以便后续的分析和处理
+
+# Create condition-specific GInteractions调用上述函数识别鞍点
+gi_HMEC <- mtx2GInteractions(fileNameIn = fileNameIn5, condition = "HMEC")
+gi_TNBC <- mtx2GInteractions(fileNameIn = fileNameIn6, condition = "TNBC")
+
+# Make seqlevels the same使两个 GInteractions 对象在序列级别上保持一致
+seqlevels(gi_HMEC) <- seqlevels(gi_TNBC) <- unique(c(seqlevels(gi_HMEC), seqlevels(gi_TNBC)))
+
+```
+
+# Results file names 主要是对于loop分析，其他TAD依据前面的函数自己发挥拓展
+注意结果输出的文件夹以及各自命名的规则:dir_results1
+```{r results}
+#下面是HMEC vs TNBC的 
+# Results
+dir_results1  <- file.path(dir_data, paste0("TNBC_preprocessing_", overlap_type)) 
+dir.create(dir_results1, recursive = TRUE) # Create if does not exist
+## Loops 因为分辨率我前面都改成了10000具体数字，就不用kb了
+fileNameOut1.1 <- file.path(dir_results1, paste0("loops_HMEC_unique_", res, ".bedpe"))
+fileNameOut1.2 <- file.path(dir_results1, paste0("loops_TNBC_unique_", res, ".bedpe"))
+fileNameOut1.3 <- file.path(dir_results1, paste0("loops_HMEC_common_", res, ".bedpe"))
+fileNameOut1.4 <- file.path(dir_results1, paste0("loops_TNBC_common_", res, ".bedpe"))
+fileNameOut1.5 <- file.path(dir_results1, paste0("loops_combined_",  res, ".bedpe"))
+fileNameOut1.6 <- file.path(dir_results1, paste0("loops_HMEC_all_",  res, ".bedpe"))
+fileNameOut1.7 <- file.path(dir_results1, paste0("loops_TNBC_all_",  res, ".bedpe"))
+## Anchors 
+fileNameOut2.1 <- file.path(dir_results1, paste0("anchors_HMEC_unique_", res, ".bed"))
+fileNameOut2.2 <- file.path(dir_results1, paste0("anchors_TNBC_unique_", res, ".bed"))
+fileNameOut2.3 <- file.path(dir_results1, paste0("anchors_HMEC_common_", res, ".bed"))
+fileNameOut2.4 <- file.path(dir_results1, paste0("anchors_TNBC_common_", res, ".bed"))
+fileNameOut2.5 <- file.path(dir_results1, paste0("anchors_combined_", res, ".bed"))
+fileNameOut2.6 <- file.path(dir_results1, paste0("anchors_HMEC_all_", res, ".bed"))
+fileNameOut2.7 <- file.path(dir_results1, paste0("anchors_TNBC_all_", res, ".bed"))
+# Statistics with the number of loops and anchors
+fileNameOut3 <- file.path(dir_results1, paste0("log_", res, ".csv"))
+```
+
+# Separate loops 主要处理收集bedPE文件
+
+注意findoverlaps函数的用法：
+参考https://mp.weixin.qq.com/s/CdWmt5E4fH1UsMsyYe_7Xg
+主要是获得目的2个基因组区域有交集部分区域，会返回在各自数据集中的索引，比如说对象1的第X个对象即第X个loop和对象2的第Y个loop之间有区域交集，那么最后结果返回的就会有X Y这么一条
+
+
+其实可以看出，后续对于anchor所谓的相同使用的也就是any的overlap
+所以仔细分析就是：
+第一个的findoverlap只是使用any扩大一个非常宽松的范围，但是实际上并没有筛选common的loop+anchor，应该是筛选出一个大范围的loop数据，然后再细致到anchor中进行真正的common的筛选，但是前面已经将findoverlap之外的loop视为unique的loople，倒是common的loop需要进一步依据anchor数据进一步筛选
+
+我还以为是这里筛选出commonloop之后再使用差集获取diff的loop数据，但是看样子前面识别的unique的loop已经是最后的结果了，那这样一来最后common+unique不一定=all
+我还是在想，这里找到的common的大前提的loop，是2x2个anchor中有任意1个overlap，
+那取差集实际上就是完全没有overlap anchor的loop，作为特异性的，当然也有问题，因为anchor就只有10kb即res的数据
+然后common是要两个anchor各自1vs1,2vs2有overlap的
+
+
+就是理论上的common没有太大问题，但是unique需要另外all-common
+主要是前面对两个区域范围的grange对象能不能使findoverlap
+
+主要是该脚本中处理的loop以及anchor的数据有疑问，但是过程代码难理解
+所以直接从结果上看是不是loop以及anchor数据都没有遗失
+我觉得common的思路没有错，大前提overlap+细节anchor overlap两步到位
+然后unique再all-common
+但是这里是直接common的大前提里就all-common了
+
+```{r separate_loops}
+# Intersect loops,实际上就是比较loop区域的交集对应的索引；注意这里的loop的数据，实际上就是range1+range2，也就是两个anchor的范围所构成的一个范围数据对象；然后使用       
+index_common_loops <- findOverlaps(gi_HMEC, gi_TNBC, type = overlap_type) #前面的gi就是从mtx中获取互作GR对象，算是寻找loop，这一步才是找loop的交集,那应该就是某行是有交集的
+# Condition-specific loops complementing common取差集，即取特异性loop，前面是全部的loop，然后后者就是anchor区域有交集的，就是所谓的公共的loop
+loops_HMEC_unique <- gi_HMEC[setdiff(1:length(gi_HMEC), unique(queryHits(index_common_loops)))]
+loops_TNBC_unique <- gi_TNBC[setdiff(1:length(gi_TNBC), unique(subjectHits(index_common_loops)))]
+      
+# Common loops should have identical first and second anchors. Don't check if no overlap, length(index_common_loops) is 0  除了loop要有交集，还得anchor也有重叠(指的是鞍点)
+#如果是 0，说明没有重叠的loop，无需进行后续的检查  
+if (length(index_common_loops) != 0) {
+  #下面的数据分析实际上，就是对已经有的overlap的筛选，就是前面已经筛选出了any的overlap的数据，但是any还不行，any只是对loop进行的分析，如果要真的说是一致的loop，那肯定是要深入anchor角度进行的分析      
+  # Overlap between first anchors,对anchor1的any的overlap的识别，前提是在最前面overlap筛选之后的对象基础上
+  overlap_common_loops1 <- findOverlaps(anchorOne(gi_HMEC[queryHits(index_common_loops)]), anchorOne(gi_TNBC[subjectHits(index_common_loops)]), type=overlap_type)
+  # Overlap between second anchors，同上
+  overlap_common_loops2 <- findOverlaps(anchorTwo(gi_HMEC[queryHits(index_common_loops)]), anchorTwo(gi_TNBC[subjectHits(index_common_loops)]), type=overlap_type)
+  #使用 findOverlaps() 函数计算 gi_HMEC 和 gi_TNBC 中重叠loop的第一个锚点和第二个锚点之间的重叠
+  # Their indices should be equal queryHits(overlap_common_loops1)和subjectHits(overlap_common_loops1)用于获取第一个重叠结果中的查询和主体索引，简单理解为queryHits(index_common_loops)用于获取这些循环在gi_HMEC数据集中的索引，而subjectHits(index_common_loops)用于获取在gi_TNBC数据集中的索引，就是分开找loop1/2中的1/2anchor
+  stopifnot(all.equal(unique(sort(queryHits(overlap_common_loops1))),
+                      unique(sort(subjectHits(overlap_common_loops1)))) &
+            all.equal(unique(sort(queryHits(overlap_common_loops2))), 
+                      unique(sort(subjectHits(overlap_common_loops2)))))
+  # stopifnot(all.equal(anchorOne(gi_PR[queryHits(index_common_loops)]), anchorOne(gi_CR[subjectHits(index_common_loops)]))  & 
+  #   all.equal(anchorTwo(gi_PR[queryHits(index_common_loops)]), anchorTwo(gi_CR[subjectHits(index_common_loops)]))) 
+}
+# Actual common loops
+loops_HMEC_common <- gi_HMEC[unique(queryHits(index_common_loops))]
+loops_TNBC_common <- gi_TNBC[unique(subjectHits(index_common_loops))]
+#这段代码的目的是确保在相同的回路中，第一个锚点和第二个锚点是相同的。具体步骤如下：
+#首先检查 index_common_loops 的长度是否为 0。如果是 0，说明没有重叠的回路，无需进行后续的检查。
+#如果 index_common_loops 的长度不为 0，即存在重叠的回路：
+#使用 findOverlaps() 函数计算 gi_HMEC 和 gi_TNBC 中重叠回路的第一个锚点和第二个锚点之间的重叠。
+#检查第一个锚点和第二个锚点之间的重叠的索引是否相同。这里使用 stopifnot() 函数来确保这两个重叠的索引相等，如果不相等，则会抛出一个错误。
+#如果第一步和第二步都通过了，说明重叠的回路中的第一个锚点和第二个锚点是相同的。然后从 gi_HMEC 和 gi_TNBC 中提取出这些相同的回路，并存储在 loops_HMEC_common 和 loops_TNBC_common 中
+#前两步都是检验，实际没有进行数据操作
+
+# HMEC unique - green, 0,255,0
+bedpe_HMEC_unique <- toBEDPE(mtx_selected = as.data.frame(loops_HMEC_unique), col = "0,255,0", condition = "HMEC")
+fwrite(bedpe_HMEC_unique, file = fileNameOut1.1, quote = FALSE, sep = "\t", row.names = FALSE)
+# TNBC unique - red, 255,0,0
+bedpe_TNBC_unique <- toBEDPE(mtx_selected = as.data.frame(loops_TNBC_unique), col = "255,0,0", condition = "TNBC")
+fwrite(bedpe_TNBC_unique, file = fileNameOut1.2, quote = FALSE, sep = "\t", row.names = FALSE)
+# Common - blue, 0,0,255
+# If common are present, add them to the combined, otherwise, combine just HMEC and TNBC specific
+# if (length(index_common_loops) != 0) {
+#   bedpe_XX_common <- toBEDPE(mtx_selected = as.data.frame(loops_XX_common), col = "0,0,255", condition = "Common") 
+#   fwrite(bedpe_XX_common, file = fileNameOut1.3, quote = FALSE, sep = "\t", row.names = FALSE)
+#   # Save combined, with common
+#   fwrite(rbind(bedpe_PR_unique, bedpe_CR_unique, bedpe_XX_common), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+# } else {
+#   # Save combined, without common
+#   fwrite(rbind(bedpe_PR_unique, bedpe_CR_unique), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+# }
+
+#如果loop之间有overlap，
+if (length(index_common_loops) != 0) {
+  # HMEC common
+  bedpe_HMEC_common <- toBEDPE(mtx_selected = as.data.frame(loops_HMEC_common), col = "0,0,255", condition = "Common HMEC") 
+  fwrite(bedpe_HMEC_common, file = fileNameOut1.3, quote = FALSE, sep = "\t", row.names = FALSE)
+  # TNBC common
+  bedpe_TNBC_common <- toBEDPE(mtx_selected = as.data.frame(loops_TNBC_common), col = "0,0,255", condition = "Common TNBC") 
+  fwrite(bedpe_TNBC_common, file = fileNameOut1.4, quote = FALSE, sep = "\t", row.names = FALSE)
+  # Save combined, with common将 HMEC 和 TNBC 的独特loop以及公共loop合并，然后将合并结果写入文件 fileNameOut1.5 中
+  fwrite(rbind(bedpe_HMEC_unique, bedpe_TNBC_unique, bedpe_HMEC_common, bedpe_TNBC_common), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+} else {
+  # Save combined, without common如果不存在公共loop重叠，则直接将 HMEC 和 TNBC 的独特loop合并，然后将合并结果写入文件 fileNameOut1.5 中
+  fwrite(rbind(bedpe_HMEC_unique, bedpe_TNBC_unique), file = fileNameOut1.5, quote = FALSE, sep = "\t", row.names = FALSE)
+}
+
+# Save statistics主要是loop数目，主要就是length
+fwrite(list("Loops HMEC all count", length(gi_HMEC)), file = fileNameOut3, append = TRUE)
+fwrite(list("Loops TNBC all count", length(gi_TNBC)), file = fileNameOut3, append = TRUE)
+fwrite(list("Loops HMEC unique count", length(loops_HMEC_unique)), file = fileNameOut3, append = TRUE)
+fwrite(list("Loops TNBC unique count", length(loops_TNBC_unique)), file = fileNameOut3, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(list("Loops HMEC common count", length(loops_HMEC_common)), file = fileNameOut3, append = TRUE)
+  fwrite(list("Loops TNBC common count", length(loops_TNBC_common)), file = fileNameOut3, append = TRUE)
+}
+# Width summary调用函数width_summary，统计loop一些数据信息
+fwrite(width_summary("Loops HMEC all width", gi_HMEC), file = fileNameOut3, append = TRUE)
+fwrite(width_summary("Loops TNBC all width", gi_TNBC), file = fileNameOut3, append = TRUE)
+fwrite(width_summary("Loops HMEC unique width", loops_HMEC_unique), file = fileNameOut3, append = TRUE)
+fwrite(width_summary("Loops TNBC unique width", loops_TNBC_unique), file = fileNameOut3, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(width_summary("Loops HMEC common width", loops_HMEC_common), file = fileNameOut3, append = TRUE)
+  fwrite(width_summary("Loops TNBC common width", loops_TNBC_common), file = fileNameOut3, append = TRUE)
+}
+# Difference analysis，同样调用前面定义的width_difference函数，进行loop宽度的差异分析
+fwrite(list("HMEC all vs. TNBC all width difference", width_difference(gi_HMEC, gi_TNBC)), file = fileNameOut3, append = TRUE)
+fwrite(list("HMEC unique vs. TNBC unique width difference", width_difference(loops_HMEC_unique, loops_TNBC_unique)), file = fileNameOut3, append = TRUE)
+if (length(index_common_loops) != 0) {
+  fwrite(list("HMEC unique vs. HMEC common width difference", width_difference(loops_HMEC_unique, loops_HMEC_common)), file = fileNameOut3, append = TRUE)
+  fwrite(list("TNBC unique vs. TNBC common width difference", width_difference(loops_TNBC_unique, loops_TNBC_common)), file = fileNameOut3, append = TRUE)
+}
+
+```
+
+# Separate anchors 主要处理收集bed文件
+
+BED files are sorted by anchor interaction frequency, most frequently interacting on top
+```{r separate_anchors}
+## Get unique anchors with interaction frequency counts
+#对锚点的合并、排序和计算交互频率,使用 countOverlaps() 函数来计算每个锚点与自身的重叠次数，即锚点的自相交。这个自相交的数量实际上代表了每个锚点的交互频率
+# HMEC
+# Combine first and second anchors
+all_anchors_HMEC <- c(anchors(gi_HMEC)$first, anchors(gi_HMEC)$second) %>% sort() 
+# Count overlap with themselves = frequency
+all_anchors_HMEC$freq <- countOverlaps(all_anchors_HMEC, all_anchors_HMEC, type = overlap_type) 
+full_anchors_HMEC <- all_anchors_HMEC # Unreduced anchors
+# Reduce adjacent anchors将相邻的区域合并为一个更大的区域，以便覆盖所有相邻的区域。这个函数通常在处理基因组数据时用于简化和优化区域的表示
+all_anchors_HMEC <- reduce(all_anchors_HMEC)   
+
+# TNBC
+# Combine first and second anchors
+all_anchors_TNBC <- c(anchors(gi_TNBC)$first, anchors(gi_TNBC)$second) %>% sort() 
+# Count overlap with themselves = frequency
+all_anchors_TNBC$freq <- countOverlaps(all_anchors_TNBC, all_anchors_TNBC, type = overlap_type) 
+full_anchors_TNBC <- all_anchors_TNBC # Unreduced anchors
+# Reduce adjacent anchors
+all_anchors_TNBC <- reduce(all_anchors_TNBC)
+
+# Selected region, for testing
+# gr_selected <- GRanges(seqnames="chr7", ranges = IRanges(20455284, 20737829))
+# all_anchors_PR <- subsetByOverlaps(all_anchors_PR, gr_selected)
+# all_anchors_CR <- subsetByOverlaps(all_anchors_CR, gr_selected)
+
+## Indexes for overlapping regions
+index_common_anchors <- findOverlaps(all_anchors_HMEC, all_anchors_TNBC, type = overlap_type)
+
+## Indexes for unique regions差集，特有anchor
+index_anchors_HMEC_unique <- setdiff(1:length(all_anchors_HMEC), queryHits(index_common_anchors))
+index_anchors_TNBC_unique <- setdiff(1:length(all_anchors_TNBC), subjectHits(index_common_anchors))
+# HMEC      
+anchors_HMEC_unique <- all_anchors_HMEC[index_anchors_HMEC_unique] # All unique anchors
+# anchors_PR_unique <- anchors_PR_unique[order(anchors_PR_unique$freq, decreasing = TRUE)] # Most interacting on top
+# TNBC 
+anchors_TNBC_unique <- all_anchors_TNBC[index_anchors_TNBC_unique] # All unique anchors
+# anchors_CR_unique <- anchors_CR_unique[order(anchors_CR_unique$freq, decreasing = TRUE)] # Most interacting on top
+ 
+# All common anchors共有anchor  
+anchors_HMEC_common <- all_anchors_HMEC[unique(queryHits(index_common_anchors))]
+anchors_TNBC_common <- all_anchors_TNBC[unique(subjectHits(index_common_anchors))]
+ 
+# Restore the original anchor coordinates
+#根据一组参考区域（在这里是 full_anchors_HMEC）将另一组区域（在这里是 anchors_HMEC_unique）的坐标信息映射回原始的坐标空间，将独有的锚点坐标映射回了原始的坐标空间，使得我们可以在原始数据集中准确地定位这些锚点
+anchors_HMEC_unique <- subsetByOverlaps(full_anchors_HMEC, anchors_HMEC_unique)
+anchors_TNBC_unique <- subsetByOverlaps(full_anchors_TNBC, anchors_TNBC_unique)
+anchors_HMEC_common <- subsetByOverlaps(full_anchors_HMEC, anchors_HMEC_common)
+anchors_TNBC_common <- subsetByOverlaps(full_anchors_TNBC, anchors_TNBC_common)
+
+# Check, should be equal reduced. Don't check if no overlap, length(index_common_loops) is 0
+# if (length(index_common_anchors) != 0) {
+#   stopifnot(all.equal(reduce(anchors_PR_common), reduce(anchors_CR_common)))
+# }
+# # Check, common regions should be equal. Don't check if no overlap, length(index_common_loops) is 0
+# if (length(index_common_anchors) != 0) {
+#   # Overlap between reduced common regions should have the same indices
+#   overlap_common_anchors <- findOverlaps(reduce(anchors_PR_common),
+#                                          reduce(anchors_CR_common),
+#                                          type = overlap_type)
+#   stopifnot(all.equal(unique(sort(queryHits(overlap_common_anchors))), unique(sort(subjectHits(overlap_common_anchors)))))
+# 
+#     # stopifnot(all.equal(granges(all_anchors_PR[queryHits(index_common_anchors)]), granges(all_anchors_CR[subjectHits(index_common_anchors)])))
+# }
+
+# HMEC unique - green, 0,255,0
+bed_HMEC_unique <- toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = TRUE)
+fwrite(bed_HMEC_unique, file = fileNameOut2.1, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# TNBC unique - red, 255,0,0
+bed_TNBC_unique <- toBED(mtx_selected = as.data.frame(anchors_TNBC_unique), col = "255,0,0", condition = "TNBC", header = TRUE)
+fwrite(bed_TNBC_unique, file = fileNameOut2.2, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# Common - blue, 0,0,255
+# If common are present, add them to the combined, otherwise, combine just HMEC and TNBC specific
+if (length(index_common_anchors) != 0) {
+  # HMEC common
+  bed_HMEC_common <- toBED(mtx_selected = as.data.frame(anchors_HMEC_common), col = "0,0,255", condition = "Common HMEC", header = TRUE) 
+  fwrite(bed_HMEC_common, file = fileNameOut2.3, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+  # TNBC common
+  bed_TNBC_common <- toBED(mtx_selected = as.data.frame(anchors_TNBC_common), col = "0,0,255", condition = "Common TNBC", header = TRUE) 
+  fwrite(bed_TNBC_common, file = fileNameOut2.4, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+
+  # Create combined, with common
+  bed_combined <- rbind(toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_TNBC_unique), col = "255,0,0", condition = "TNBC", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_HMEC_common), col = "0,0,255", condition = "Common HMEC", header = FALSE) ,
+                        toBED(mtx_selected = as.data.frame(anchors_TNBC_common), col = "0,0,255", condition = "Common TNBC", header = FALSE))
+  # Sort by frequency
+  bed_combined <- bed_combined[order(bed_combined$score, decreasing = TRUE), ]
+  # Append header
+  bed_combined <- rbind(c("track itemRgb=On", rep("", ncol(bed_combined) - 1)), bed_combined)
+  # Save combined
+  fwrite(bed_combined, file = fileNameOut2.5, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+} else {
+  # Create combined, without common
+  bed_combined <- rbind(toBED(mtx_selected = as.data.frame(anchors_HMEC_unique), col = "0,255,0", condition = "HMEC", header = FALSE),
+                        toBED(mtx_selected = as.data.frame(anchors_TNBC_unique), col = "255,0,0", condition = "TNBC", header = FALSE))
+  # Sort by frequency
+  bed_combined <- bed_combined[order(bed_combined$score, decreasing = TRUE), ]
+  # Append header
+  bed_combined <- rbind(c("track itemRgb=On", rep("", ncol(bed_combined) - 1)), bed_combined)
+  # Save combined
+  fwrite(bed_combined, file = fileNameOut2.5, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+}
+
+# Save statistics，同上
+fwrite(list("Anchors HMEC all count", length(full_anchors_HMEC)), file = fileNameOut3, append = TRUE)
+fwrite(list("Anchors TNBC all count", length(full_anchors_TNBC)), file = fileNameOut3, append = TRUE)
+fwrite(list("Anchors HMEC unique count", length(anchors_HMEC_unique)), file = fileNameOut3, append = TRUE)
+fwrite(list("Anchors TNBC unique count", length(anchors_TNBC_unique)), file = fileNameOut3, append = TRUE)
+fwrite(list("Anchors HMEC common count", length(anchors_HMEC_common)), file = fileNameOut3, append = TRUE)
+fwrite(list("Anchors TNBC common count", length(anchors_TNBC_common)), file = fileNameOut3, append = TRUE)
+
+```
+
+# All loops
+
+```{r all_loops}
+# HMEC all - green, 0,255,0
+bedpe_HMEC_all <- toBEDPE(mtx_selected = as.data.frame(gi_HMEC), col = "0,255,0", condition = "HMEC all")
+fwrite(bedpe_HMEC_all, file = fileNameOut1.6, quote = FALSE, sep = "\t", row.names = FALSE)
+# TNBC all - red, 255,0,0
+bedpe_TNBC_all <- toBEDPE(mtx_selected = as.data.frame(gi_TNBC), col = "255,0,0", condition = "TNBC all")
+fwrite(bedpe_TNBC_all, file = fileNameOut1.7, quote = FALSE, sep = "\t", row.names = FALSE)
+
+```
+
+# All anchors
+
+```{r all_anchors}
+# HMEC all - green, 0,255,0
+bed_HMEC_all <- toBED(mtx_selected = as.data.frame(full_anchors_HMEC), col = "0,255,0", condition = "HMEC", header = TRUE)
+fwrite(bed_HMEC_all, file = fileNameOut2.6, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+# TNBC all - red, 255,0,0
+bed_TNBC_all <- toBED(mtx_selected = as.data.frame(full_anchors_TNBC), col = "255,0,0", condition = "TNBC", header = TRUE)
+fwrite(bed_TNBC_all, file = fileNameOut2.7, quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
+
+```
+
+
+
+###############从下面开始对loop的bedpe等文件进行EPC等注释
+使用R包GenomicInteractions
+参考https://bioconductor.org/packages/release/bioc/vignettes/GenomicInteractions/inst/doc/hic_vignette.html
+以及https://bioconductor.org/packages/release/bioc/vignettes/GenomicInteractions/inst/doc/chiapet_vignette.html
+```{r}
+library(Gviz)
+library(GenomicInteractions)
+library(GenomicRanges)
+library(InteractionSet)
+
+```
+
+#首先是loop文件的准备
+可以直接使用上面代码中的loops_TNBC_unique或者是gi_TNBC(原始的所有loop文件)
+或者是自己读取00脚本处理结果，然后再转换成gr对象
+但是前者都用不了%>% GenomicRanges::reduce()
+```{r}
+gi_TNBC #26817
+loops_TNBC_unique #11235
+#下面以loops_TNBC_unique试一试,anchor函数不会更改顺序
+anchorOne(loops_TNBC_unique)
+anchorTwo(loops_TNBC_unique)
+regions(loops_TNBC_unique)
+
+plotCisTrans(loops_TNBC_unique)
+
+
+
+library(GenomicFeatures)
+library(RMariaDB)
+library(biomaRt)
+#install.packages("RMariaDB")
+#BiocManager::install("biomaRt")
+hg19.refseq.db <- makeTxDbFromUCSC(genome="hg19", table="refGene")
+refseq.genes = genes(hg19.refseq.db)
+refseq.transcripts = transcriptsBy(hg19.refseq.db, by="gene")
+refseq.transcripts = refseq.transcripts[ names(refseq.transcripts) %in% unlist(refseq.genes$gene_id) ] 
+#启动子设置为上下游1kb
+hg19_refseq_promoters <- promoters(refseq.transcripts, 1000,1000)
+hg19_refseq_promoters <- unique(hg19_refseq_promoters) # some duplicate promoters from different transcript isoforms
+
+
+#get gene symbols
+#mart = useMart('ensembl')
+#listDatasets(mart)
+
+mart = useMart("ensembl", dataset="hsapiens_gene_ensembl")
+genes <- getBM(attributes = c("mgi_symbol", "refseq_mrna"), filter = "refseq_mrna",
+               values = hg19_refseq_promoters$tx_name, mart = mart)
+hg19_refseq_promoters$geneSymbol <- genes$mgi_symbol[match(hg19_refseq_promoters$tx_name, genes$refseq_mrna)]
+
+names(hg19_refseq_promoters) <- hg19_refseq_promoters$geneSymbol
+na.symbol <- is.na(names(hg19_refseq_promoters))
+names(hg19_refseq_promoters)[na.symbol] <- hg19_refseq_promoters$tx_name[na.symbol]
+```
+
+
+```{r}
+TNBC_uniqueloop
+TNBC <- makeGenomicInteractionsFromFile("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_TNBC_unique_10000.bedpe", 
+                    type="bedpe", 
+                    experiment_name = "TNBC unique loop", 
+                    description = "TNBC unique loop 10kb res")
+
+
+```
