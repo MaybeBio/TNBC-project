@@ -1,0 +1,22 @@
+Loops HMEC all count,16430
+Loops TNBC all count,26817
+Loops HMEC unique count,6104
+Loops TNBC unique count,11235
+Loops HMEC common count,10326
+Loops TNBC common count,15582
+Loops HMEC all width,60000,330000,434152.77,1960000
+Loops TNBC all width,50000,310000,405074.02,1970000
+Loops HMEC unique width,70000,4e+05,515987.88,1960000
+Loops TNBC unique width,50000,330000,439048.51,1970000
+Loops HMEC common width,60000,290000,385777.65,1950000
+Loops TNBC common width,70000,290000,380577.59,1950000
+HMEC all vs. TNBC all width difference,1.17e-11
+HMEC unique vs. TNBC unique width difference,1.24e-31
+HMEC unique vs. HMEC common width difference,1.13e-85
+TNBC unique vs. TNBC common width difference,2.42e-29
+Anchors HMEC all count,32860
+Anchors TNBC all count,53634
+Anchors HMEC unique count,4562
+Anchors TNBC unique count,7695
+Anchors HMEC common count,28298
+Anchors TNBC common count,45939
