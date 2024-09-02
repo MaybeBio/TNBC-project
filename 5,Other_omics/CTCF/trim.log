@@ -1,0 +1,688 @@
+nohup: ignoring input
+Using an excessive number of cores has a diminishing return! It is recommended not to exceed 8 cores per trimming process (you asked for 15 cores). Please consider re-specifying
+Path to Cutadapt set as: 'cutadapt' (default)
+Cutadapt seems to be working fine (tested command 'cutadapt --version')
+Cutadapt version: 4.6
+Could not detect version of Python used by Cutadapt from the first line of Cutadapt (but found this: >>>#!/bin/sh<<<)
+Letting the (modified) Cutadapt deal with the Python version instead
+pigz 2.8
+Parallel gzip (pigz) detected. Proceeding with multicore (de)compression using 15 cores
+
+igzip command line interface 2.30.0
+igzip detected. Using igzip for decompressing
+
+No quality encoding type selected. Assuming that the data provided uses Sanger encoded Phred scores (default)
+
+
+
+AUTO-DETECTING ADAPTER TYPE
+===========================
+Attempting to auto-detect adapter type from the first 1 million sequences of the first file (>> SRR13755426_trimmed.fq <<)
+
+Found perfect matches for the following adapter sequences:
+Adapter type	Count	Sequence	Sequences analysed	Percentage
+Nextera	4	CTGTCTCTTATA	1000000	0.00
+smallRNA	3	TGGAATTCTCGG	1000000	0.00
+Illumina	0	AGATCGGAAGAGC	1000000	0.00
+Using Nextera adapter for trimming (count: 4). Second best hit was smallRNA (count: 3)
+
+Writing report to 'SRR13755426_trimmed.fq_trimming_report.txt'
+
+SUMMARISING RUN PARAMETERS
+==========================
+Input filename: SRR13755426_trimmed.fq
+Trimming mode: single-end
+Trim Galore version: 0.6.10
+Cutadapt version: 4.6
+Python version: could not detect
+Number of cores used for trimming: 15
+Quality Phred score cutoff: 20
+Quality encoding type selected: ASCII+33
+Adapter sequence: 'CTGTCTCTTATA' (Nextera Transposase sequence; auto-detected)
+Maximum trimming error rate: 0.1 (default)
+Minimum required adapter overlap (stringency): 1 bp
+Minimum required sequence length before a sequence gets removed: 20 bp
+All Read 1 sequences will be trimmed by 2 bp from their 3' end to avoid poor qualities or biases
+Running FastQC on the data once trimming has completed
+Running FastQC with the following extra arguments: '-o multiqc2 -t 15'
+
+Cutadapt seems to be fairly up-to-date (version 4.6). Setting -j 15
+Writing final adapter and quality trimmed output to SRR13755426_trimmed_trimmed.fq
+
+
+  >>> Now performing quality (cutoff '-q 20') and adapter trimming in a single pass for the adapter sequence: 'CTGTCTCTTATA' from file SRR13755426_trimmed.fq <<< 
+10000000 sequences processed
+20000000 sequences processed
+30000000 sequences processed
+40000000 sequences processed
+This is cutadapt 4.6 with Python 3.10.13
+Command line parameters: -j 15 -e 0.1 -q 20 -O 1 -a CTGTCTCTTATA SRR13755426_trimmed.fq
+Processing single-end reads on 15 cores ...
+Finished in 56.658 s (1.289 µs/read; 46.54 M reads/minute).
+
+=== Summary ===
+
+Total reads processed:              43,950,017
+Reads with adapters:                19,878,988 (45.2%)
+Reads written (passing filters):    43,950,017 (100.0%)
+
+Total basepairs processed: 2,175,669,375 bp
+Quality-trimmed:                 448,296 bp (0.0%)
+Total written (filtered):  2,147,634,564 bp (98.7%)
+
+=== Adapter 1 ===
+
+Sequence: CTGTCTCTTATA; Type: regular 3'; Length: 12; Trimmed: 19878988 times
+
+Minimum overlap: 1
+No. of allowed errors:
+1-9 bp: 0; 10-12 bp: 1
+
+Bases preceding removed adapters:
+  A: 21.8%
+  C: 26.9%
+  G: 25.7%
+  T: 25.6%
+  none/other: 0.0%
+
+Overview of removed sequences
+length	count	expect	max.err	error counts
+1	14715738	10987504.2	0	14715738
+2	3518896	2746876.1	0	3518896
+3	1256160	686719.0	0	1256160
+4	268713	171679.8	0	268713
+5	65127	42919.9	0	65127
+6	24169	10730.0	0	24169
+7	9683	2682.5	0	9683
+8	4539	670.6	0	4539
+9	1091	167.7	0	561 530
+10	1659	41.9	1	41 1618
+11	902	10.5	1	36 866
+12	343	2.6	1	0 343
+13	281	2.6	1	3 278
+14	324	2.6	1	6 318
+15	329	2.6	1	8 321
+16	301	2.6	1	0 301
+17	331	2.6	1	9 322
+18	283	2.6	1	3 280
+19	328	2.6	1	3 325
+20	359	2.6	1	4 355
+21	313	2.6	1	7 306
+22	313	2.6	1	5 308
+23	334	2.6	1	3 331
+24	249	2.6	1	9 240
+25	309	2.6	1	4 305
+26	347	2.6	1	4 343
+27	292	2.6	1	1 291
+28	307	2.6	1	5 302
+29	366	2.6	1	4 362
+30	322	2.6	1	4 318
+31	350	2.6	1	4 346
+32	335	2.6	1	4 331
+33	398	2.6	1	3 395
+34	304	2.6	1	4 300
+35	303	2.6	1	8 295
+36	385	2.6	1	11 374
+37	284	2.6	1	3 281
+38	331	2.6	1	3 328
+39	295	2.6	1	7 288
+40	256	2.6	1	3 253
+41	308	2.6	1	3 305
+42	330	2.6	1	7 323
+43	356	2.6	1	3 353
+44	291	2.6	1	3 288
+45	356	2.6	1	2 354
+46	339	2.6	1	11 328
+47	272	2.6	1	11 261
+48	326	2.6	1	3 323
+49	259	2.6	1	0 259
+50	202	2.6	1	2 200
+
+RUN STATISTICS FOR INPUT FILE: SRR13755426_trimmed.fq
+=============================================
+43950017 sequences processed in total
+Sequences removed because they became shorter than the length cutoff of 20 bp:	8931 (0.0%)
+
+
+  >>> Now running FastQC on the data <<<
+
+null
+Started analysis of SRR13755426_trimmed_trimmed.fq
+Approx 5% complete for SRR13755426_trimmed_trimmed.fq
+Approx 10% complete for SRR13755426_trimmed_trimmed.fq
+Approx 15% complete for SRR13755426_trimmed_trimmed.fq
+Approx 20% complete for SRR13755426_trimmed_trimmed.fq
+Approx 25% complete for SRR13755426_trimmed_trimmed.fq
+Approx 30% complete for SRR13755426_trimmed_trimmed.fq
+Approx 35% complete for SRR13755426_trimmed_trimmed.fq
+Approx 40% complete for SRR13755426_trimmed_trimmed.fq
+Approx 45% complete for SRR13755426_trimmed_trimmed.fq
+Approx 50% complete for SRR13755426_trimmed_trimmed.fq
+Approx 55% complete for SRR13755426_trimmed_trimmed.fq
+Approx 60% complete for SRR13755426_trimmed_trimmed.fq
+Approx 65% complete for SRR13755426_trimmed_trimmed.fq
+Approx 70% complete for SRR13755426_trimmed_trimmed.fq
+Approx 75% complete for SRR13755426_trimmed_trimmed.fq
+Approx 80% complete for SRR13755426_trimmed_trimmed.fq
+Approx 85% complete for SRR13755426_trimmed_trimmed.fq
+Approx 90% complete for SRR13755426_trimmed_trimmed.fq
+Approx 95% complete for SRR13755426_trimmed_trimmed.fq
+Analysis complete for SRR13755426_trimmed_trimmed.fq
+Using an excessive number of cores has a diminishing return! It is recommended not to exceed 8 cores per trimming process (you asked for 15 cores). Please consider re-specifying
+Path to Cutadapt set as: 'cutadapt' (default)
+Cutadapt seems to be working fine (tested command 'cutadapt --version')
+Cutadapt version: 4.6
+Could not detect version of Python used by Cutadapt from the first line of Cutadapt (but found this: >>>#!/bin/sh<<<)
+Letting the (modified) Cutadapt deal with the Python version instead
+pigz 2.8
+Parallel gzip (pigz) detected. Proceeding with multicore (de)compression using 15 cores
+
+igzip command line interface 2.30.0
+igzip detected. Using igzip for decompressing
+
+No quality encoding type selected. Assuming that the data provided uses Sanger encoded Phred scores (default)
+
+
+
+AUTO-DETECTING ADAPTER TYPE
+===========================
+Attempting to auto-detect adapter type from the first 1 million sequences of the first file (>> SRR13755436_trimmed.fq <<)
+
+Found perfect matches for the following adapter sequences:
+Adapter type	Count	Sequence	Sequences analysed	Percentage
+Nextera	4	CTGTCTCTTATA	1000000	0.00
+smallRNA	1	TGGAATTCTCGG	1000000	0.00
+Illumina	0	AGATCGGAAGAGC	1000000	0.00
+Using Nextera adapter for trimming (count: 4). Second best hit was smallRNA (count: 1)
+
+Writing report to 'SRR13755436_trimmed.fq_trimming_report.txt'
+
+SUMMARISING RUN PARAMETERS
+==========================
+Input filename: SRR13755436_trimmed.fq
+Trimming mode: single-end
+Trim Galore version: 0.6.10
+Cutadapt version: 4.6
+Python version: could not detect
+Number of cores used for trimming: 15
+Quality Phred score cutoff: 20
+Quality encoding type selected: ASCII+33
+Adapter sequence: 'CTGTCTCTTATA' (Nextera Transposase sequence; auto-detected)
+Maximum trimming error rate: 0.1 (default)
+Minimum required adapter overlap (stringency): 1 bp
+Minimum required sequence length before a sequence gets removed: 20 bp
+All Read 1 sequences will be trimmed by 2 bp from their 3' end to avoid poor qualities or biases
+Running FastQC on the data once trimming has completed
+Running FastQC with the following extra arguments: '-o multiqc2 -t 15'
+
+Cutadapt seems to be fairly up-to-date (version 4.6). Setting -j 15
+Writing final adapter and quality trimmed output to SRR13755436_trimmed_trimmed.fq
+
+
+  >>> Now performing quality (cutoff '-q 20') and adapter trimming in a single pass for the adapter sequence: 'CTGTCTCTTATA' from file SRR13755436_trimmed.fq <<< 
+10000000 sequences processed
+20000000 sequences processed
+30000000 sequences processed
+40000000 sequences processed
+This is cutadapt 4.6 with Python 3.10.13
+Command line parameters: -j 15 -e 0.1 -q 20 -O 1 -a CTGTCTCTTATA SRR13755436_trimmed.fq
+Processing single-end reads on 15 cores ...
+Finished in 79.917 s (1.671 µs/read; 35.91 M reads/minute).
+
+=== Summary ===
+
+Total reads processed:              47,832,673
+Reads with adapters:                20,432,207 (42.7%)
+Reads written (passing filters):    47,832,673 (100.0%)
+
+Total basepairs processed: 2,365,141,481 bp
+Quality-trimmed:                 820,532 bp (0.0%)
+Total written (filtered):  2,335,114,936 bp (98.7%)
+
+=== Adapter 1 ===
+
+Sequence: CTGTCTCTTATA; Type: regular 3'; Length: 12; Trimmed: 20432207 times
+
+Minimum overlap: 1
+No. of allowed errors:
+1-9 bp: 0; 10-12 bp: 1
+
+Bases preceding removed adapters:
+  A: 24.8%
+  C: 25.7%
+  G: 21.1%
+  T: 28.4%
+  none/other: 0.0%
+
+Overview of removed sequences
+length	count	expect	max.err	error counts
+1	14612799	11958168.2	0	14612799
+2	4038039	2989542.1	0	4038039
+3	1310368	747385.5	0	1310368
+4	323491	186846.4	0	323491
+5	73368	46711.6	0	73368
+6	31690	11677.9	0	31690
+7	13876	2919.5	0	13876
+8	6045	729.9	0	6045
+9	1526	182.5	0	712 814
+10	2321	45.6	1	68 2253
+11	1170	11.4	1	28 1142
+12	418	2.9	1	1 417
+13	410	2.9	1	5 405
+14	453	2.9	1	4 449
+15	499	2.9	1	3 496
+16	471	2.9	1	2 469
+17	418	2.9	1	6 412
+18	407	2.9	1	5 402
+19	490	2.9	1	3 487
+20	469	2.9	1	6 463
+21	432	2.9	1	5 427
+22	452	2.9	1	6 446
+23	436	2.9	1	6 430
+24	438	2.9	1	10 428
+25	468	2.9	1	7 461
+26	464	2.9	1	4 460
+27	463	2.9	1	4 459
+28	459	2.9	1	3 456
+29	492	2.9	1	6 486
+30	455	2.9	1	6 449
+31	448	2.9	1	5 443
+32	461	2.9	1	4 457
+33	503	2.9	1	6 497
+34	495	2.9	1	8 487
+35	413	2.9	1	5 408
+36	471	2.9	1	3 468
+37	439	2.9	1	4 435
+38	453	2.9	1	7 446
+39	455	2.9	1	7 448
+40	454	2.9	1	10 444
+41	488	2.9	1	5 483
+42	489	2.9	1	7 482
+43	451	2.9	1	4 447
+44	471	2.9	1	5 466
+45	452	2.9	1	3 449
+46	472	2.9	1	3 469
+47	409	2.9	1	8 401
+48	406	2.9	1	3 403
+49	408	2.9	1	6 402
+50	282	2.9	1	4 278
+
+RUN STATISTICS FOR INPUT FILE: SRR13755436_trimmed.fq
+=============================================
+47832673 sequences processed in total
+Sequences removed because they became shorter than the length cutoff of 20 bp:	11622 (0.0%)
+
+
+  >>> Now running FastQC on the data <<<
+
+null
+Started analysis of SRR13755436_trimmed_trimmed.fq
+Approx 5% complete for SRR13755436_trimmed_trimmed.fq
+Approx 10% complete for SRR13755436_trimmed_trimmed.fq
+Approx 15% complete for SRR13755436_trimmed_trimmed.fq
+Approx 20% complete for SRR13755436_trimmed_trimmed.fq
+Approx 25% complete for SRR13755436_trimmed_trimmed.fq
+Approx 30% complete for SRR13755436_trimmed_trimmed.fq
+Approx 35% complete for SRR13755436_trimmed_trimmed.fq
+Approx 40% complete for SRR13755436_trimmed_trimmed.fq
+Approx 45% complete for SRR13755436_trimmed_trimmed.fq
+Approx 50% complete for SRR13755436_trimmed_trimmed.fq
+Approx 55% complete for SRR13755436_trimmed_trimmed.fq
+Approx 60% complete for SRR13755436_trimmed_trimmed.fq
+Approx 65% complete for SRR13755436_trimmed_trimmed.fq
+Approx 70% complete for SRR13755436_trimmed_trimmed.fq
+Approx 75% complete for SRR13755436_trimmed_trimmed.fq
+Approx 80% complete for SRR13755436_trimmed_trimmed.fq
+Approx 85% complete for SRR13755436_trimmed_trimmed.fq
+Approx 90% complete for SRR13755436_trimmed_trimmed.fq
+Approx 95% complete for SRR13755436_trimmed_trimmed.fq
+Analysis complete for SRR13755436_trimmed_trimmed.fq
+Using an excessive number of cores has a diminishing return! It is recommended not to exceed 8 cores per trimming process (you asked for 15 cores). Please consider re-specifying
+Path to Cutadapt set as: 'cutadapt' (default)
+Cutadapt seems to be working fine (tested command 'cutadapt --version')
+Cutadapt version: 4.6
+Could not detect version of Python used by Cutadapt from the first line of Cutadapt (but found this: >>>#!/bin/sh<<<)
+Letting the (modified) Cutadapt deal with the Python version instead
+pigz 2.8
+Parallel gzip (pigz) detected. Proceeding with multicore (de)compression using 15 cores
+
+igzip command line interface 2.30.0
+igzip detected. Using igzip for decompressing
+
+No quality encoding type selected. Assuming that the data provided uses Sanger encoded Phred scores (default)
+
+
+
+AUTO-DETECTING ADAPTER TYPE
+===========================
+Attempting to auto-detect adapter type from the first 1 million sequences of the first file (>> SRR15567100_trimmed.fq <<)
+
+Found perfect matches for the following adapter sequences:
+Adapter type	Count	Sequence	Sequences analysed	Percentage
+Nextera	5	CTGTCTCTTATA	1000000	0.00
+smallRNA	0	TGGAATTCTCGG	1000000	0.00
+Illumina	0	AGATCGGAAGAGC	1000000	0.00
+Using Nextera adapter for trimming (count: 5). Second best hit was smallRNA (count: 0)
+
+Writing report to 'SRR15567100_trimmed.fq_trimming_report.txt'
+
+SUMMARISING RUN PARAMETERS
+==========================
+Input filename: SRR15567100_trimmed.fq
+Trimming mode: single-end
+Trim Galore version: 0.6.10
+Cutadapt version: 4.6
+Python version: could not detect
+Number of cores used for trimming: 15
+Quality Phred score cutoff: 20
+Quality encoding type selected: ASCII+33
+Adapter sequence: 'CTGTCTCTTATA' (Nextera Transposase sequence; auto-detected)
+Maximum trimming error rate: 0.1 (default)
+Minimum required adapter overlap (stringency): 1 bp
+Minimum required sequence length before a sequence gets removed: 20 bp
+All Read 1 sequences will be trimmed by 2 bp from their 3' end to avoid poor qualities or biases
+Running FastQC on the data once trimming has completed
+Running FastQC with the following extra arguments: '-o multiqc2 -t 15'
+
+Cutadapt seems to be fairly up-to-date (version 4.6). Setting -j 15
+Writing final adapter and quality trimmed output to SRR15567100_trimmed_trimmed.fq
+
+
+  >>> Now performing quality (cutoff '-q 20') and adapter trimming in a single pass for the adapter sequence: 'CTGTCTCTTATA' from file SRR15567100_trimmed.fq <<< 
+10000000 sequences processed
+20000000 sequences processed
+30000000 sequences processed
+This is cutadapt 4.6 with Python 3.10.13
+Command line parameters: -j 15 -e 0.1 -q 20 -O 1 -a CTGTCTCTTATA SRR15567100_trimmed.fq
+Processing single-end reads on 15 cores ...
+Finished in 47.547 s (1.272 µs/read; 47.18 M reads/minute).
+
+=== Summary ===
+
+Total reads processed:              37,383,917
+Reads with adapters:                16,115,500 (43.1%)
+Reads written (passing filters):    37,383,917 (100.0%)
+
+Total basepairs processed: 1,848,818,458 bp
+Quality-trimmed:                 515,999 bp (0.0%)
+Total written (filtered):  1,825,204,083 bp (98.7%)
+
+=== Adapter 1 ===
+
+Sequence: CTGTCTCTTATA; Type: regular 3'; Length: 12; Trimmed: 16115500 times
+
+Minimum overlap: 1
+No. of allowed errors:
+1-9 bp: 0; 10-12 bp: 1
+
+Bases preceding removed adapters:
+  A: 24.7%
+  C: 25.9%
+  G: 21.0%
+  T: 28.4%
+  none/other: 0.0%
+
+Overview of removed sequences
+length	count	expect	max.err	error counts
+1	11491443	9345979.2	0	11491443
+2	3201218	2336494.8	0	3201218
+3	1047638	584123.7	0	1047638
+4	257866	146030.9	0	257866
+5	58877	36507.7	0	58877
+6	25434	9126.9	0	25434
+7	10346	2281.7	0	10346
+8	4773	570.4	0	4773
+9	1208	142.6	0	580 628
+10	1702	35.7	1	49 1653
+11	894	8.9	1	29 865
+12	411	2.2	1	3 408
+13	325	2.2	1	1 324
+14	344	2.2	1	3 341
+15	363	2.2	1	5 358
+16	321	2.2	1	2 319
+17	372	2.2	1	0 372
+18	357	2.2	1	0 357
+19	402	2.2	1	8 394
+20	401	2.2	1	4 397
+21	317	2.2	1	3 314
+22	335	2.2	1	8 327
+23	343	2.2	1	1 342
+24	341	2.2	1	6 335
+25	401	2.2	1	8 393
+26	375	2.2	1	4 371
+27	380	2.2	1	5 375
+28	383	2.2	1	3 380
+29	376	2.2	1	4 372
+30	368	2.2	1	5 363
+31	327	2.2	1	8 319
+32	381	2.2	1	6 375
+33	368	2.2	1	4 364
+34	420	2.2	1	4 416
+35	380	2.2	1	0 380
+36	384	2.2	1	7 377
+37	382	2.2	1	4 378
+38	368	2.2	1	0 368
+39	379	2.2	1	6 373
+40	328	2.2	1	4 324
+41	360	2.2	1	7 353
+42	380	2.2	1	6 374
+43	352	2.2	1	1 351
+44	333	2.2	1	0 333
+45	405	2.2	1	4 401
+46	371	2.2	1	2 369
+47	347	2.2	1	4 343
+48	338	2.2	1	3 335
+49	345	2.2	1	2 343
+50	238	2.2	1	1 237
+
+RUN STATISTICS FOR INPUT FILE: SRR15567100_trimmed.fq
+=============================================
+37383917 sequences processed in total
+Sequences removed because they became shorter than the length cutoff of 20 bp:	8680 (0.0%)
+
+
+  >>> Now running FastQC on the data <<<
+
+null
+Started analysis of SRR15567100_trimmed_trimmed.fq
+Approx 5% complete for SRR15567100_trimmed_trimmed.fq
+Approx 10% complete for SRR15567100_trimmed_trimmed.fq
+Approx 15% complete for SRR15567100_trimmed_trimmed.fq
+Approx 20% complete for SRR15567100_trimmed_trimmed.fq
+Approx 25% complete for SRR15567100_trimmed_trimmed.fq
+Approx 30% complete for SRR15567100_trimmed_trimmed.fq
+Approx 35% complete for SRR15567100_trimmed_trimmed.fq
+Approx 40% complete for SRR15567100_trimmed_trimmed.fq
+Approx 45% complete for SRR15567100_trimmed_trimmed.fq
+Approx 50% complete for SRR15567100_trimmed_trimmed.fq
+Approx 55% complete for SRR15567100_trimmed_trimmed.fq
+Approx 60% complete for SRR15567100_trimmed_trimmed.fq
+Approx 65% complete for SRR15567100_trimmed_trimmed.fq
+Approx 70% complete for SRR15567100_trimmed_trimmed.fq
+Approx 75% complete for SRR15567100_trimmed_trimmed.fq
+Approx 80% complete for SRR15567100_trimmed_trimmed.fq
+Approx 85% complete for SRR15567100_trimmed_trimmed.fq
+Approx 90% complete for SRR15567100_trimmed_trimmed.fq
+Approx 95% complete for SRR15567100_trimmed_trimmed.fq
+Analysis complete for SRR15567100_trimmed_trimmed.fq
+Using an excessive number of cores has a diminishing return! It is recommended not to exceed 8 cores per trimming process (you asked for 15 cores). Please consider re-specifying
+Path to Cutadapt set as: 'cutadapt' (default)
+Cutadapt seems to be working fine (tested command 'cutadapt --version')
+Cutadapt version: 4.6
+Could not detect version of Python used by Cutadapt from the first line of Cutadapt (but found this: >>>#!/bin/sh<<<)
+Letting the (modified) Cutadapt deal with the Python version instead
+pigz 2.8
+Parallel gzip (pigz) detected. Proceeding with multicore (de)compression using 15 cores
+
+igzip command line interface 2.30.0
+igzip detected. Using igzip for decompressing
+
+No quality encoding type selected. Assuming that the data provided uses Sanger encoded Phred scores (default)
+
+
+
+AUTO-DETECTING ADAPTER TYPE
+===========================
+Attempting to auto-detect adapter type from the first 1 million sequences of the first file (>> SRR15567110_trimmed.fq <<)
+
+Found perfect matches for the following adapter sequences:
+Adapter type	Count	Sequence	Sequences analysed	Percentage
+Nextera	8	CTGTCTCTTATA	1000000	0.00
+Illumina	0	AGATCGGAAGAGC	1000000	0.00
+smallRNA	0	TGGAATTCTCGG	1000000	0.00
+Using Nextera adapter for trimming (count: 8). Second best hit was Illumina (count: 0)
+
+Writing report to 'SRR15567110_trimmed.fq_trimming_report.txt'
+
+SUMMARISING RUN PARAMETERS
+==========================
+Input filename: SRR15567110_trimmed.fq
+Trimming mode: single-end
+Trim Galore version: 0.6.10
+Cutadapt version: 4.6
+Python version: could not detect
+Number of cores used for trimming: 15
+Quality Phred score cutoff: 20
+Quality encoding type selected: ASCII+33
+Adapter sequence: 'CTGTCTCTTATA' (Nextera Transposase sequence; auto-detected)
+Maximum trimming error rate: 0.1 (default)
+Minimum required adapter overlap (stringency): 1 bp
+Minimum required sequence length before a sequence gets removed: 20 bp
+All Read 1 sequences will be trimmed by 2 bp from their 3' end to avoid poor qualities or biases
+Running FastQC on the data once trimming has completed
+Running FastQC with the following extra arguments: '-o multiqc2 -t 15'
+
+Cutadapt seems to be fairly up-to-date (version 4.6). Setting -j 15
+Writing final adapter and quality trimmed output to SRR15567110_trimmed_trimmed.fq
+
+
+  >>> Now performing quality (cutoff '-q 20') and adapter trimming in a single pass for the adapter sequence: 'CTGTCTCTTATA' from file SRR15567110_trimmed.fq <<< 
+10000000 sequences processed
+20000000 sequences processed
+30000000 sequences processed
+This is cutadapt 4.6 with Python 3.10.13
+Command line parameters: -j 15 -e 0.1 -q 20 -O 1 -a CTGTCTCTTATA SRR15567110_trimmed.fq
+Processing single-end reads on 15 cores ...
+Finished in 48.714 s (1.335 µs/read; 44.94 M reads/minute).
+
+=== Summary ===
+
+Total reads processed:              36,488,086
+Reads with adapters:                15,511,987 (42.5%)
+Reads written (passing filters):    36,488,086 (100.0%)
+
+Total basepairs processed: 1,804,389,976 bp
+Quality-trimmed:                 506,802 bp (0.0%)
+Total written (filtered):  1,781,629,358 bp (98.7%)
+
+=== Adapter 1 ===
+
+Sequence: CTGTCTCTTATA; Type: regular 3'; Length: 12; Trimmed: 15511987 times
+
+Minimum overlap: 1
+No. of allowed errors:
+1-9 bp: 0; 10-12 bp: 1
+
+Bases preceding removed adapters:
+  A: 25.0%
+  C: 25.6%
+  G: 20.7%
+  T: 28.8%
+  none/other: 0.0%
+
+Overview of removed sequences
+length	count	expect	max.err	error counts
+1	11056173	9122021.5	0	11056173
+2	3088226	2280505.4	0	3088226
+3	1004361	570126.3	0	1004361
+4	249198	142531.6	0	249198
+5	56426	35632.9	0	56426
+6	24735	8908.2	0	24735
+7	10244	2227.1	0	10244
+8	4707	556.8	0	4707
+9	1183	139.2	0	565 618
+10	1857	34.8	1	43 1814
+11	936	8.7	1	20 916
+12	359	2.2	1	0 359
+13	327	2.2	1	11 316
+14	357	2.2	1	3 354
+15	381	2.2	1	9 372
+16	328	2.2	1	3 325
+17	344	2.2	1	0 344
+18	353	2.2	1	5 348
+19	348	2.2	1	6 342
+20	370	2.2	1	4 366
+21	338	2.2	1	5 333
+22	348	2.2	1	2 346
+23	349	2.2	1	4 345
+24	367	2.2	1	1 366
+25	393	2.2	1	1 392
+26	389	2.2	1	2 387
+27	333	2.2	1	3 330
+28	337	2.2	1	4 333
+29	370	2.2	1	3 367
+30	364	2.2	1	8 356
+31	355	2.2	1	2 353
+32	371	2.2	1	5 366
+33	371	2.2	1	0 371
+34	386	2.2	1	3 383
+35	350	2.2	1	5 345
+36	369	2.2	1	1 368
+37	358	2.2	1	3 355
+38	366	2.2	1	2 364
+39	348	2.2	1	3 345
+40	405	2.2	1	3 402
+41	374	2.2	1	3 371
+42	371	2.2	1	1 370
+43	383	2.2	1	4 379
+44	347	2.2	1	3 344
+45	347	2.2	1	2 345
+46	371	2.2	1	4 367
+47	375	2.2	1	2 373
+48	357	2.2	1	8 349
+49	339	2.2	1	4 335
+50	243	2.2	1	2 241
+
+RUN STATISTICS FOR INPUT FILE: SRR15567110_trimmed.fq
+=============================================
+36488086 sequences processed in total
+Sequences removed because they became shorter than the length cutoff of 20 bp:	8429 (0.0%)
+
+
+  >>> Now running FastQC on the data <<<
+
+null
+Started analysis of SRR15567110_trimmed_trimmed.fq
+Approx 5% complete for SRR15567110_trimmed_trimmed.fq
+Approx 10% complete for SRR15567110_trimmed_trimmed.fq
+Approx 15% complete for SRR15567110_trimmed_trimmed.fq
+Approx 20% complete for SRR15567110_trimmed_trimmed.fq
+Approx 25% complete for SRR15567110_trimmed_trimmed.fq
+Approx 30% complete for SRR15567110_trimmed_trimmed.fq
+Approx 35% complete for SRR15567110_trimmed_trimmed.fq
+Approx 40% complete for SRR15567110_trimmed_trimmed.fq
+Approx 45% complete for SRR15567110_trimmed_trimmed.fq
+Approx 50% complete for SRR15567110_trimmed_trimmed.fq
+Approx 55% complete for SRR15567110_trimmed_trimmed.fq
+Approx 60% complete for SRR15567110_trimmed_trimmed.fq
+Approx 65% complete for SRR15567110_trimmed_trimmed.fq
+Approx 70% complete for SRR15567110_trimmed_trimmed.fq
+Approx 75% complete for SRR15567110_trimmed_trimmed.fq
+Approx 80% complete for SRR15567110_trimmed_trimmed.fq
+Approx 85% complete for SRR15567110_trimmed_trimmed.fq
+Approx 90% complete for SRR15567110_trimmed_trimmed.fq
+Approx 95% complete for SRR15567110_trimmed_trimmed.fq
+Analysis complete for SRR15567110_trimmed_trimmed.fq
+
+  /// MultiQC 🔍 | v1.11
+
+|           multiqc | MultiQC Version v1.21 now available!
+|           multiqc | Search path : /mnt/disk4/haitao/bysj_seu/geo_data/other_omics/CTCF/multiqc2
+|         searching | ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 8/8  
+|            fastqc | Found 4 reports
+|           multiqc | Compressing plot data
+|           multiqc | Previous MultiQC output found! Adjusting filenames..
+|           multiqc | Use -f or --force to overwrite existing reports instead
+|           multiqc | Report      : multiqc_report_1.html
+|           multiqc | Data        : multiqc_data_1
+|           multiqc | MultiQC complete
