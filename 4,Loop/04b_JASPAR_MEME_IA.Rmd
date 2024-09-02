@@ -1,0 +1,685 @@
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+# Set up the environment
+library(knitr)
+library(formatR)
+opts_chunk$set(cache.path = "cache/", fig.path = "img/", cache = T, echo = F, dpi = 100, warnings = F, message = F, comment = NA, warning = F, fig.align = "center" , tidy.opts = list(width.cutoff = 60), tidy = TRUE, fig.width = 10) # out.width=700,
+library(pander)
+# panderOptions("table.split.table", Inf)
+set.seed(1)
+library(dplyr)
+options(stringsAsFactors = FALSE)
+```
+
+
+This script performs integrative analysis, and the HMEC, TNBC, and Common **masked** anchors for each resolution, anchor type, and window size (for SpectralTAD anchors) will be merged together. Before merging, the anchor dataframes will be modified by adding a `status` column to identify the condition the anchor came from (for the HMEC dataframe, the status will be HMEC, and so on). Merging the three conditions allows for combined condition heatmaps and De-novo analysis, which will help visualize the difference in motif enrichments between different conditions more clearly. Followed the vignette in https://snystrom.github.io/memes-manual/articles/integrative_analysis.html, and flanking the anchors was not needed as they were already masked using open chromatin regions. 
+
+
+
+Use RNA seq data from `results/RNA-seq/RNA-seq_2019/UCD52_Human_MGT_vs_LiverMet.xlsx` and filter out genes highly expressed using the baseMean column. This allows for our database to contain only relevant genes. 
+
+
+## Parameters
+- -log10(p.adj.value): cut off for filtering the results from running AME. 
+    - Mustache:
+        - 10kb: 50
+        - 25kb: 100
+        - 50kb & 100kb: 200
+    - HiCcompare:
+        - 10kb: 20
+        - 25kb, 50kb, 100kb: 100
+- max: the maximum -log10(p.adj.value) which is important for coloring the heatmap properly
+    - Mustache: 300
+    - HiCcompare:
+        - 10kb: 80
+        - 25kb: 250
+        - 50kb & 100kb: 300
+- data_type: specifies which data we are using 
+- resolution: resolution string (ex. "100kb")
+- database: the database used for running AME; as of now just using JASPAR or HOCOMOCO but any can be used. 
+- min_basemean: minimum value of baseMean column used to filter out the database to contain only highly expressed genes. Not inclusive. 
+
+**Input:** Masked anchors (HMEC, TNBC, Common).
+- Mustache Masked Anchors
+- HiCcompare Masked Anchors
+- Neoloop Masked Anchors
+  - Original Neoloops 
+    - No adjacent, no overlaps (10kb)
+    - Adjacent, overlaps (10kb)
+  - Kavita's Neoloops 
+    - No adjacent, no overlaps (10kb)
+    - Adjacent, overlaps (10kb)
+- SpectralTAD Masked Anchors 
+  - No adjacent, no overlaps (50, 100, 200 window sizes)
+  - Adjacent, overlaps (50, 100, 200 window sizes)
+
+**Output:** 
+
+1. Heatmap of enriched motifs with a -log10(ad.pvalue) > the cut off separated by data type (HiCcompare, Mustache, Neoloops, Kavita Neoloops, SpectralTAD), condition (TNBC/HMEC/Common), resolution, window size (for SpectralTAD). Located in the respective data type and anchor folder in `MEME_results/Shuffled`
+2. Correlation heatmap comparing de-novo motifs between each condition (HMEC/TNBC/Common) to identify motifs which could distinguish the three conditions for each resolution. Located in the respective data type and anchor folder in
+`Motif_Enrichment/MEME_results/De-novo_results`
+3. Heatmap of AME run on de-novo results to check de-novo motifs. Located in the respective data type and anchor folder in `Motif_Enrichment/MEME_results/De-novo_results`
+    
+# Libraries 
+
+```{r echo=FALSE}
+#BiocManager::install("memes")
+library(memes)
+library(GenomicRanges)
+library(magrittr)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(writexl)
+library(VennDiagram)
+library(tidyverse)
+library(gplots)
+library(ggplot2)
+library(universalmotif)
+library(readxl)
+library(dplyr)
+library(sjmisc)
+library(pheatmap)
+```
+
+# Settings 
+TNBC原始，BT549-HCC70-MB231分别是123
+```{r settings}
+# Maggie's paths 
+dir_home = '/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result'
+# preprocessing type
+preprocessing = 'any'
+# resolution parameter, change for each resolution even for SpectralTAD
+resolution = "10000" 
+# Data type
+data_type = "Mustache"
+# data_type = "HiCcompare"
+
+# set minimum base mean parameter to filter out the database 
+min_basemean = 5 # more stringent filtering method 
+# set the database 
+meme_database = "JASPAR"
+# meme_database = "HOCOMOCO"
+
+#本来读入的数据是经过ATAC过滤之后的，承接的是04a脚本, "Motif_Enrichment/Masked_Anchors"，此处没有使用ATAC数据，直接使用原始的anchor或者loop数据
+#TNBC
+dir_data <- file.path(dir_home, paste0("TNBC_preprocessing_", preprocessing))
+dir_results <- file.path(dir_data, "Motif_Enrichment")
+#BT549
+dir_data1 <- file.path(dir_home, paste0("BT549_preprocessing_", preprocessing))
+dir_results1 <- file.path(dir_data1, "Motif_Enrichment")
+#HCC70
+dir_data2 <- file.path(dir_home, paste0("HCC70_preprocessing_", preprocessing))
+dir_results2 <- file.path(dir_data2, "Motif_Enrichment")
+#MB231
+dir_data3 <- file.path(dir_home, paste0("MB231_preprocessing_", preprocessing))
+dir_results3 <- file.path(dir_data3 , "Motif_Enrichment")
+
+dir.create(dir_results, recursive = TRUE)
+dir.create(dir_results1, recursive = TRUE)
+dir.create(dir_results2, recursive = TRUE)
+dir.create(dir_results3, recursive = TRUE)
+
+# Set max parameter for all Mustache loops will be 300,下面的参数设置未知，是依据res设置的参数！！！！！！！！！！！其实后面可以发现，这里使用的阈值针对的是后面motif分析的时候AME，为了防止富集到的motif过多而在图形中观察到的一个阈值，主要是下面的cutoff，但是max是？
+max = 300
+neg.log10.p.adj.cutoff = 200 #or 300
+
+# data directory of RNA seq results, used in the future,这里实际上就是RNA-seq处理中原始的DEG文件，但是还没有经过DEG分析，全部gene
+dir_data_rna_seq <- file.path("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script8/RNA/ens_fa_gtf/DEG/edgeR_HMEC_vs_TNBC.csv")
+# set the database file depending on the meme_database parameter set above，对应的数据库文件未知，应该是对应前面的meme的参考文档
+#meme_database == "JASPAR"，不知道是原始下载的文件是合成一个完整的meme文件还是使用全部的meme文件夹，我这里将single batch的txt文件全都复制了过来相当于是文件夹下面的meme文件都合并在了一起
+database_file ="/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/JASPAR.meme"
+#"/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/JASPAR.meme",原始使用的jaspar的meme文件，然后下面是另外一个数据库的meme文件
+#"/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/JASPAR2022_CORE_vertebrates_non_redundant_pfms_meme"
+#"/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/H12CORE_meme_format.meme"
+```
+
+# Filter Database
+
+Filter the database to contain genes with a basemean value greater than the minimum value specified above. Then set the AME database to the filtered database. Note: The HOCOMOCO database has NA for altname column, so we will have to use the name column to filter instead. 
+实际修改之后的代码，使用的gene不做筛选低表达gene的操作，因为当初在DEG分析中已经做过类似的工作了
+然后就是对于meme的motif数据库，筛选了与表达gene相关联的数据库，只使用了jaspar，没有使用hocomoco
+但是这里对于表达的定义需要另外自己经验化处理，用什么指标筛选出于表达的gene，从而锁定后续使用的motif数据
+```{r rnaseq}
+#### HOCOMOCO database does not have an altname 
+# load the motif database and then convert it to a dataframe to more easily manipulate it
+meme_db <- read_meme(database_file) %>% 
+  to_df()
+# read in the file as a dataframe 
+RNA_seq <- read.csv(dir_data_rna_seq, header = TRUE)
+
+# plot RNA seq basemean distribution,注意原来RNA-seq分析中并没有basemean这一列，而自己的分析也没有这一列，倒是有log2Average.HMEC以及log2Average.TNBC这两列，所以可以暂时筛选这两列，但是看这里的处理好像是没有涉及到condition，所以可以
+#1，在TNBC以及HMEC的logmean列都＞5，使用&&
+#2，或者是重新再计算一次，计算新的一列，使用全部rep的数据，不管是HMEC还是TNBC
+#或者此处不筛选，毕竟当初自己处理的DEG文件是有个筛选低表达gene的操作edgeR，详见自己脚本
+#hist(RNA_seq$log2Average.HMEC, breaks = 1000, xlim = c(0,10), ylim = c(0,1000))
+
+# filter out only the expressed genes using the min_basemean parameter，省略了第三部
+expressed_genes <- RNA_seq %>% 
+  dplyr::group_by(symbol) 
+#%>% dplyr::filter(baseMean > min_basemean)
+
+
+# filter the full motif database to select only those motifs corresponding to expressed genes for JASPAR ONLY，motif文件中有个altname，大概是和gene symbol一致的,源代码中此处使用了jaspar以及hocomoco的meme文件，然后大概是看这里的效果好坏筛选出比较好效果的一个数据库，但是后者操作麻烦，还是只选择一个meme的数据库算了，毕竟数据库很多，比价之间对于操作没有太大意义
+meme_db_expressed <- meme_db %>% 
+  # the altname slot of meme_db contains the gene symbol
+  # (this is database-specific)
+  dplyr::filter(altname %in% expressed_genes$symbol)
+
+# look how how many rows are in each, before and after
+# nrow(meme_db) #  879 for JASPAR; 1443 for HOCOMOCO
+# nrow(meme_db_expressed) # 496 for JASPAR; 229 for HOCOMOCO
+
+# now set the updated database to the meme database to be used in the future analysis 
+# to_list() converts the database back from data.frame format to a standard `universalmotif` object.
+options(meme_db = to_list(meme_db_expressed, extrainfo = FALSE))
+#> Discarding unknown slot(s) 'eval.string' (set `extrainfo=TRUE` to
+#>   preserve these).
+```
+
+# Files
+
+Read in masked bed files of anchors 
+此处没有使用脚本04a，所以并没有使用ATAC数据进行筛选
+下面是HMEC vs TNBC的分析,
+```{r files}
+HMEC <- read.table(file.path(dir_data, paste0('anchors_HMEC_unique_',resolution, '.bed')),header = FALSE, sep="\t",stringsAsFactors=FALSE, quote="", skip = 1)
+TNBC <- read.table(file.path(dir_data, paste0( 'anchors_TNBC_unique_',resolution, '.bed')),header = FALSE, sep="\t",stringsAsFactors=FALSE, quote="", skip = 1)
+HMEC_Common <- read.table(file.path(dir_data, paste0( 'anchors_HMEC_common_',resolution, '.bed')),header = FALSE, sep="\t",stringsAsFactors=FALSE, quote="", skip = 1)
+TNBC_Common <- read.table(file.path(dir_data, paste0( 'anchors_TNBC_common_',resolution, '.bed')),header = FALSE, sep="\t",stringsAsFactors=FALSE, quote="", skip = 1)
+```
+
+# GRanges 
+
+Convert bed files to GRanges & add `status` column according to the condition 
+使用的数据没有进行reduce，可以在这里reduce
+!!!!!!!!!!!!!!!!!!!!!!!!!!!注意，前面分析的数据无论是loop还是anchor，都没有使用过reduce，
+这里可以是原始的数据，也可以在这里进行reduce,
+此处选择reduce操作,注意reduce操作要在status之前
+``` {r GR}
+#下面的anchor数据进行reduce处理
+GR_HMEC = GRanges(seqnames=HMEC$V1, 
+                      ranges= IRanges(start=HMEC$V2, end=HMEC$V3))  #4562
+GR_HMEC <- GR_HMEC %>% GenomicRanges::reduce()  #3628
+GR_HMEC$status = "HMEC"
+GR_TNBC = GRanges(seqnames=TNBC$V1, 
+                      ranges= IRanges(start=TNBC$V2, end=TNBC$V3))
+GR_TNBC <- GR_TNBC %>% GenomicRanges::reduce()
+GR_TNBC$status = "TNBC"
+
+
+GR_HMEC_Common = GRanges(seqnames=HMEC_Common$V1, 
+                      ranges= IRanges(start=HMEC_Common$V2, end=HMEC_Common$V3))
+GR_HMEC_Common <- GR_HMEC_Common %>% GenomicRanges::reduce()
+GR_HMEC_Common$status = "HMEC Common"
+
+GR_TNBC_Common = GRanges(seqnames=TNBC_Common$V1, 
+                      ranges= IRanges(start=TNBC_Common$V2, end=TNBC_Common$V3))
+GR_TNBC_Common <- GR_TNBC_Common %>% GenomicRanges::reduce()
+GR_TNBC_Common$status = "TNBC Common"
+``` 
+
+# Combine Conditions
+
+Combine masked anchors into one dataframe to run integrated analysis.
+
+```{r combine}
+combined_anchors <- c(GR_HMEC, GR_TNBC, GR_HMEC_Common, GR_TNBC_Common)
+```
+
+# Examination of conditions with AME 
+
+First collect the sequences of each category (condition). The data are returned as a Biostrings List, where each list entry represents the sequences of each anchor condition (TNBC, Common, HMEC).
+要找motif，首先要收集序列，所以这里实际上就是收集各种anchor的序列
+```{r sequences}
+by_status <- combined_anchors %>%
+  # Get a list of anchors belonging to each set
+  split(mcols(.)$status) %>%
+  # look up the DNA sequence of each anchor within each group
+  get_sequence(BSgenome.Hsapiens.UCSC.hg19)
+```
+
+Now, we test each set of sequences using AME with the `runAme` function. This will run AME on each set of input sequences in the Biostrings List. Returns a list object where each entry is the AME results for each status or condition.
+AME identifies known motifs (provided by the user) that are enriched in your input sequences.
+总之AME就是一个能够用于识别序列中富集的motif的工具
+```{r ame}
+ame_by_status <- by_status %>% 
+  runAme()
+```
+
+View the results for each status
+
+```{r results1}
+print('TNBC AME results')
+ame_by_status$TNBC
+print('TNBC Common AME results')
+ame_by_status$`TNBC Common`
+print('HMEC Common AME results')
+ame_by_status$`HMEC Common`
+print('HMEC AME results')
+ame_by_status$HMEC
+```
+
+## Visualize AME results 
+
+Use `dplyr::bind_rows()` to combine the lists of AME results into a single dataframe and the different statuses will be used to distinguish each AME run using the `status` column. (Use .id = "status" which will create a new column "status" that will contain the names from ame_by_status_resolution list, corresponding to the different conditions HMEC, TNBC, Common)
+
+```{r combineresults}
+ame_results <- ame_by_status %>% 
+  dplyr::bind_rows(.id = "status")
+```
+
+Aggregate results from multiple runs (different conditions) to produce one heatmap by setting the group parameter in plot_ame_heatmap() to status. To reduce redunant motifs, use motif_alt_id as the id for plot_ame_heatmap(), and select the hit for each transcription factor with the most significant hit. 
+
+```{r heatmap1}
+ame_results %>% 
+  # perform the next dplyr operation on each TF within each status
+  dplyr::group_by(status, motif_alt_id) %>%
+  # within each status, select the TF hit with the lowest adjusted p-value
+  dplyr::filter(adj.pvalue == min(adj.pvalue)) %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(y = "Anchor Condition",
+         x = "Transcription Factor Motif") +
+   scale_y_discrete(limits = c("TNBC", "HMEC", "TNBC Common", "HMEC Common"))
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_all.pdf"),height = 5,width = 40)
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_all.png"),height = 5,width = 40)
+
+
+#实际处理的时候可以选择可视化top10的motif，可以在前面中就使用status来约束对象
+ame_results %>% 
+  dplyr::group_by(status, motif_alt_id) %>%
+  dplyr::filter(adj.pvalue == min(adj.pvalue)) %>% 
+  dplyr::filter(rank %in% 1:40) %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(y = "Anchor Condition",
+         x = "Transcription Factor Motif") +
+   scale_y_discrete(limits = c("TNBC", "HMEC", "TNBC Common", "HMEC Common"))+
+    ggtitle("Top 40 AME Hits in HEMC vs TNBC")
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_top40.pdf"),height = 3,width = 12)
+
+ame_results %>% 
+  dplyr::group_by(status, motif_alt_id) %>%
+  dplyr::filter(adj.pvalue == min(adj.pvalue)) %>% 
+  dplyr::filter(rank %in% 1:30) %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(y = "Anchor Condition",
+         x = "Transcription Factor Motif") +
+   scale_y_discrete(limits = c("TNBC", "HMEC", "TNBC Common", "HMEC Common"))+
+    ggtitle("Top 30 AME Hits in HEMC vs TNBC")
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_top30.pdf"),height = 3,width = 10)
+
+ame_results %>% 
+  dplyr::group_by(status, motif_alt_id) %>%
+  dplyr::filter(adj.pvalue == min(adj.pvalue)) %>% 
+  dplyr::filter(rank %in% 1:20) %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(y = "Anchor Condition",
+         x = "Transcription Factor Motif") +
+   scale_y_discrete(limits = c("TNBC", "HMEC", "TNBC Common", "HMEC Common"))+
+    ggtitle("Top 20 AME Hits in HEMC vs TNBC")
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_top20.pdf"),height = 3,width = 8)
+
+ame_results %>% 
+  dplyr::group_by(status, motif_alt_id) %>%
+  dplyr::filter(adj.pvalue == min(adj.pvalue)) %>% 
+  dplyr::filter(rank %in% 1:10) %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(y = "Anchor Condition",
+         x = "Transcription Factor Motif") +
+   scale_y_discrete(limits = c("TNBC", "HMEC", "TNBC Common", "HMEC Common"))+
+    ggtitle("Top 10 AME Hits in HEMC vs TNBC")
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_top10.pdf"),height = 3,width = 7)
+```
+
+Visualize the number of hits and -log10 p adjusted value to determine the correct cut off for capturing only the most significant hits.
+实际上就是看图A，然后哪个阈值点能够捕获目标数据的大部分信息
+阈值可以设置为200或者是300
+```{r comparemethods}
+ame_results %>% 
+  dplyr::group_by(status, motif_alt_id) %>% 
+  dplyr::filter(adj.pvalue == min(adj.pvalue)) %>% 
+  ame_compare_heatmap_methods(group = status)
+ggsave(file.path(dir_results, "10kb_HMEC_vs_TNBC_motifAME_adjust.pdf"),height = 5,width = 10)
+```
+
+#阈值选择200或者是300
+```{R}
+
+best_ame_hits <- ame_results %>% 
+  dplyr::group_by(status, motif_alt_id) %>% 
+  dplyr::filter(adj.pvalue ==  min(adj.pvalue))
+  
+
+
+pval_heatmap <- best_ame_hits %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(x = NULL,
+         title = "-log10(adj.pvalue)")
+  
+
+norm_heatmap <- best_ame_hits %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id, value = "normalize") +
+    labs(x = NULL,
+         title = "normalize")
+
+pval_scaled_heatmap1 <- best_ame_hits %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id, scale_max = 200) +
+    labs(x = NULL,
+         title = "-log10(adj.pvalue) (scale capped at 200)")
+
+pval_scaled_heatmap2 <- best_ame_hits %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id, scale_max = 300) +
+    labs(x = NULL,
+         title = "-log10(adj.pvalue) (scale capped at 300)")
+
+cowplot::plot_grid(pval_heatmap,
+                   norm_heatmap,
+                   pval_scaled_heatmap1,
+                   pval_scaled_heatmap2,
+                   ncol = 1,
+                   labels = "AUTO")
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_all_adjust.pdf"),height = 10,width = 40)
+```
+
+
+
+Now, we can visualize the most significant hits using the -log10(p adjusted) cutoff: `r neg.log10.p.adj.cutoff`.
+使用的是300的范围，后续可以改为200的范围，以及配色使用的是红粉白，后续可以依据效果修改为红白蓝配色
+
+```{r filteredheatmap, fig.width= 20, fig.height=10}
+# Obtain the best hits, reduces the redundancy if the motif_alt_id is all the same 
+neg.log10.p.adj.cutoff=300  #or 300
+max=200    #总之就是设置成上述可视化图中200与300之间，主要是下面的midpoint计算上使用了两者的中间值
+#或者是
+
+best_ame_hits <- ame_results %>% 
+  dplyr::group_by(status, motif_alt_id) %>% 
+  dplyr::filter(adj.pvalue ==  min(adj.pvalue))
+
+# Now plot the best hits capped at setting predefined in the beginning using the graph generated in the code block above ^^ ,依据上面可视化之后的效果选取的阈值范围是200或者是300
+best_ame_hits %>% 
+  dplyr::filter(-log10(adj.pvalue) > neg.log10.p.adj.cutoff) %>%
+  dplyr::arrange(motif_alt_id) %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(x = "Motif",
+         y = "Condition",
+         title = paste0(data_type, " ", "10kb", " Anchors")) + 
+  scale_fill_gradient2(low="white", 
+                       mid="pink", 
+                       high="red", 
+                       midpoint=((neg.log10.p.adj.cutoff + max)/2)) +
+   scale_y_discrete(limits = c("TNBC", "HMEC", "TNBC Common", "HMEC Common"),
+                    labels = c("TNBC" = "TNBC Unique", "HMEC" = "HMEC Unique",
+                               "TNBC Common" = "TNBC Common", 
+                               "HMEC Common" = "HMEC Common")) +
+  theme_bw(base_size = 13) +
+  theme(#text = element_text(size = 20),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 12),
+        #axis.text.y = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5),
+        axis.title = element_text(size = 14))
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_all_adjust_final.pdf"),height = 10,width = 40)
+
+
+best_ame_hits %>% 
+  dplyr::filter(-log10(adj.pvalue) > neg.log10.p.adj.cutoff) %>%
+  dplyr::arrange(motif_alt_id) %>% 
+    dplyr::filter(rank %in% 1:40) %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(x = "Motif",
+         y = "Condition",
+         title = paste0(data_type, " ", "top40 10kb", " Anchors")) + 
+  scale_fill_gradient2(low="white", 
+                       mid="pink", 
+                       high="red", 
+                       midpoint=((neg.log10.p.adj.cutoff + max)/2)) +
+   scale_y_discrete(limits = c("TNBC", "HMEC", "TNBC Common", "HMEC Common"),
+                    labels = c("TNBC" = "TNBC Unique", "HMEC" = "HMEC Unique",
+                               "TNBC Common" = "TNBC Common", 
+                               "HMEC Common" = "HMEC Common")) +
+  theme_bw(base_size = 13) +
+  theme(#text = element_text(size = 20),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 12),
+        #axis.text.y = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5),
+        axis.title = element_text(size = 14))
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_all_adjust_final_top40.pdf"),height = 3,width = 12)
+  
+
+best_ame_hits %>% 
+  dplyr::filter(-log10(adj.pvalue) > neg.log10.p.adj.cutoff) %>%
+  dplyr::arrange(motif_alt_id) %>% 
+    dplyr::filter(rank %in% 1:30) %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(x = "Motif",
+         y = "Condition",
+         title = paste0(data_type, " ", "top30 10kb", " Anchors")) + 
+  scale_fill_gradient2(low="white", 
+                       mid="pink", 
+                       high="red", 
+                       midpoint=((neg.log10.p.adj.cutoff + max)/2)) +
+   scale_y_discrete(limits = c("TNBC", "HMEC", "TNBC Common", "HMEC Common"),
+                    labels = c("TNBC" = "TNBC Unique", "HMEC" = "HMEC Unique",
+                               "TNBC Common" = "TNBC Common", 
+                               "HMEC Common" = "HMEC Common")) +
+  theme_bw(base_size = 13) +
+  theme(#text = element_text(size = 20),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 12),
+        #axis.text.y = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5),
+        axis.title = element_text(size = 14))
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_all_adjust_final_top30.pdf"),height = 3,width = 10)
+
+
+best_ame_hits %>% 
+  dplyr::filter(-log10(adj.pvalue) > neg.log10.p.adj.cutoff) %>%
+  dplyr::arrange(motif_alt_id) %>% 
+    dplyr::filter(rank %in% 1:20) %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(x = "Motif",
+         y = "Condition",
+         title = paste0(data_type, " ", "top20 10kb", " Anchors")) + 
+  scale_fill_gradient2(low="white", 
+                       mid="pink", 
+                       high="red", 
+                       midpoint=((neg.log10.p.adj.cutoff + max)/2)) +
+   scale_y_discrete(limits = c("TNBC", "HMEC", "TNBC Common", "HMEC Common"),
+                    labels = c("TNBC" = "TNBC Unique", "HMEC" = "HMEC Unique",
+                               "TNBC Common" = "TNBC Common", 
+                               "HMEC Common" = "HMEC Common")) +
+  theme_bw(base_size = 13) +
+  theme(#text = element_text(size = 20),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 12),
+        #axis.text.y = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5),
+        axis.title = element_text(size = 14))
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_all_adjust_final_top20.pdf"),height = 3,width = 8)
+
+
+best_ame_hits %>% 
+  dplyr::filter(-log10(adj.pvalue) > neg.log10.p.adj.cutoff) %>%
+  dplyr::arrange(motif_alt_id) %>% 
+    dplyr::filter(rank %in% 1:10) %>% 
+  plot_ame_heatmap(group = status, id = motif_alt_id) +
+    labs(x = "Motif",
+         y = "Condition",
+         title = paste0(data_type, " ", "top10 10kb", " Anchors")) + 
+  scale_fill_gradient2(low="white", 
+                       mid="pink", 
+                       high="red", 
+                       midpoint=((neg.log10.p.adj.cutoff + max)/2)) +
+   scale_y_discrete(limits = c("TNBC", "HMEC", "TNBC Common", "HMEC Common"),
+                    labels = c("TNBC" = "TNBC Unique", "HMEC" = "HMEC Unique",
+                               "TNBC Common" = "TNBC Common", 
+                               "HMEC Common" = "HMEC Common")) +
+  theme_bw(base_size = 13) +
+  theme(#text = element_text(size = 20),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 12),
+        #axis.text.y = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5),
+        axis.title = element_text(size = 14))
+ggsave(file.path(dir_results,"10kb_HMEC_vs_TNBC_motifAME_all_adjust_final_top10.pdf"),height = 3,width = 7)
+```
+
+
+#那前面分析的结果就有ame_results以及best_ame_hits，再下面的de novo分析就不能再执行了，所以这里暂时就使用已经有的分析结果进行分析
+```{r}
+
+
+ame_results
+
+```
+
+
+
+
+
+############从这里开始的de novo分析都不能正常执行，那下面的de novo分析就不进行了，主要是TNBC vs中无法进行，但是分散之后的1vs1的数据可以进行
+！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+请参考https://snystrom.github.io/memes-manual/articles/integrative_analysis.html#session-info进行补救
+**Commented out the De-Novo and TomTom analyses**
+
+
+# De-novo Motif Similiarity by Condition
+
+Use the MEME tool Dreme which discovers short de-novo motifs in input sequences, does not rely on known motif information. Run Dreme on each status (condition) for each resolution, then combine the list of Dreme results per resolution. Use the same by_status_resolution object as we did in the AME example above. 
+
+```{r dreme, eval = FALSE}
+dreme_by_status <- by_status %>% 
+  runDreme("shuffle", nmotifs = 5) %>% 
+  dplyr::bind_rows(.id = "status")
+
+```
+
+## Correlation Heatmap
+
+Examine the de-novo motifs between each status or condition, which will identify motifs that could distinguish the three different conditions. Examine the correlation score between each motif and rename the motifs to indicate which status they were found in. 
+Create the correlation heatmap for the de-novo results.
+
+可以使用红蓝配色
+```{r examine_dreme, eval = FALSE}
+dreme_by_status_renamed <- dreme_by_status %>% 
+  dplyr::mutate(name = paste(status, seq, sep = "_")) %>% 
+  # update_motifs updates the information in the special `motif` column
+  update_motifs()
+
+cols <- colorRampPalette(c("white", "red"))(255)
+
+# This is for adding the colored annotation blocks indicating group membership
+# to the heatmap
+anno.df <- dreme_by_status_renamed %>% 
+  dplyr::select(name, status) %>% 
+  tibble::remove_rownames() %>% 
+  tibble::column_to_rownames("name")
+
+dreme_by_status_renamed %>%
+  # Convert to universalmotif format 
+  to_list() %>%
+  # Compute the pearson correlation for each motif with all other motifs
+  universalmotif::compare_motifs(method = "PCC") %>%
+  # Plot the correlation matrix along with the annotations
+  pheatmap::pheatmap(color = cols,
+                     # This sets the heatmap range to be from 0-1
+                     breaks = seq(0, 1, by = 1/255),
+                     annotation_col = anno.df,
+                     # the cutree options are just cosmetic to add some spacing
+                     # between some of the clusters
+                     cutree_rows = 6,
+                     cutree_cols = 6,
+                     show_colnames = FALSE, main = paste0(data_type, " ", ifelse(data_type == "SpectralTAD", window_size, resolution), ' De-novo Motif Similarity by Condition'), fontsize = 8) 
+```
+
+```{r save_denovo, eval = FALSE}
+dreme_by_status_renamed %>%
+  # Convert to universalmotif format 
+  to_list() %>%
+  # Compute the pearson correlation for each motif with all other motifs
+  universalmotif::compare_motifs(method = "PCC") %>%
+  # Plot the correlation matrix along with the annotations
+  pheatmap::pheatmap(color = cols,
+                     # This sets the heatmap range to be from 0-1
+                     breaks = seq(0, 1, by = 1/255),
+                     annotation_col = anno.df,
+                     # the cutree options are just cosmetic to add some spacing
+                     # between some of the clusters
+                     cutree_rows = 6,
+                     cutree_cols = 6,
+                     show_colnames = FALSE, filename = file.path(dir_results, 'De-novo_results', paste0(data_type,'_',ifelse(data_type == "SpectralTAD", window_size, resolution),'_De-novo_results_by_condition.png' )), main = paste0(data_type, " ", ifelse(data_type == "SpectralTAD", window_size, resolution), ' De-novo Motif Similarity by Condition')) 
+```
+
+## Test de-novo motif enrichment using AME
+
+Use AME to test for motif enrichment of the de-novo discovered motifs within each status category, and determine whether the motifs detected in one category are indeed enriched in another. To do this, we can provide the de-novo motifs as the AME database to test for their enrichment in each sequence category
+
+```{r dremeAME, eval = FALSE}
+ame_denovo_by_status <- by_status %>% 
+  runAme(database = list("denovo_status_motifs" = dreme_by_status_renamed)) %>% 
+  dplyr::bind_rows(.id = "status") 
+```
+
+Plot the heatmap of de-novo AME results
+
+```{r dremeAME_heatmap, eval = FALSE}
+ame_denovo_by_status %>% 
+  plot_ame_heatmap(group = status, scale_max = 10) +
+  labs(x = NULL,
+         title = paste0(data_type, " ", ifelse(data_type == "SpectralTAD", window_size, resolution), " De-Novo AME results"))
+
+ggsave(file.path(dir_results, 'De-novo_results', paste0(data_type, '_' , ifelse(data_type == "SpectralTAD", window_size, resolution),'_de-novo_AME_results.pdf' ))) 
+```
+
+Plotting the heatmap of results reveals that indeed a majority of the de-novo motifs discovered within a single category are detected in all 3 conditions, supporting the conclusion that CR, PR, and Common conditions are highly similar in sequence content.
+
+### Use TomTom to match de-novo motifs to known TF motifs 
+
+```{r filterCommon, eval = FALSE}
+ interesting_motifs <- ame_denovo_by_status %>%  
+  # dplyr::filter(motif_id %in% c("Common_RTAAAYA", "CR_DAAATA", "PR_RTAAATR", "Common_CCTYCY")) %>% 
+  # dplyr::filter(!motif_id %in% c("PR_TGAVTCAB", "CR_TGASTMA", "Common_RTGAGTMA")) %>% 
+  # dplyr::filter(motif_id %in% c("CR_GDAAATR")) %>% 
+  dplyr::filter(motif_id %in% c("PR_CACGY", "PR_GCCTCMB")) %>% 
+  #dplyr::filter(motif_id %in% c("CR_RKAAATA", "CR_CCCAGSM", "PR_VAGGAAR", "CR_AGGCNGAG", "Common_GGGATTAY", "PR_GYAAAYA", "Common_CAGCCTGG", "PR_ATGAWTMA")) %>% 
+  # dplyr::filter(motif_id %in% c("Common_AAATAH", "PR_CAGGYRTG", "PR_AAATAH", "Common_CCCAGSM", "CR_RDAAATA", "CR_GCCTCCCR", "CR_RCCTGKAA")) %>% 
+  dplyr::pull(motif_id)
+
+ame_denovo_status_unique <- ame_denovo_by_status %>% 
+  dplyr::filter((motif_id %in% 
+                   interesting_motifs))
+```
+
+Next, we use the motif id's from the unique AME results to select the entries in the Dreme results object and run TomTom on that subset. Any difference in expression between the three conditions will be looked at, since the expression levels of the different conditions appear to be somewhat similar. 
+
+```{r tomtom, eval = FALSE}
+# for Tom Tom we probably have to change the name column to have the altname in it for JASPAR database 
+if(meme_database == 'JASPAR'){
+  new_meme_db <- meme_db_expressed %>%  
+    mutate(name = paste(altname, name, sep = "_"))    
+  
+  options(meme_db = to_list(new_meme_db, extrainfo = FALSE))
+}
+
+dreme_by_status_filtered <- dreme_by_status_renamed %>% 
+    dplyr::filter(name %in% 
+                    ame_denovo_status_unique$motif_id) %>% 
+  runTomTom(dist = "ed")
+```
+
+Visualize TomTom results 
+
+```{r tomtom_results, fig.width=30, fig.height= 20, eval = FALSE}
+dreme_by_status_filtered %>% 
+  view_tomtom_hits(3) %>%
+  cowplot::plot_grid(plotlist = ., 
+                     nrow = 1,
+                     labels = "AUTO",
+                     byrow = TRUE)
+```
+

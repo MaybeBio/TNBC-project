@@ -1,0 +1,1470 @@
+---
+title: "Mustache, HiCcompare, SpectralTAD Anchor Gene Annotations"
+再次说明loop中能够做的gene overlap分析同样能够运用到TAD上
+---
+
+Script to annotate each set of interesting Mustache, HiCcompare, or SpectralTAD anchors by nearest gene using (`ChIPpeakAnno::annotatePeakInBatch`)
+锚点anchor的gene回帖：可以是overlap，也可以是nearest
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+# Set up the environment 同Fig6脚本+00 loop脚本
+library(knitr)
+library(pander)
+panderOptions('table.split.table', Inf)
+set.seed(1)
+library(dplyr)
+options(stringsAsFactors = FALSE)
+```
+
+## Paths 暂时就是用mustache的loop分析，以及res=10000，以及还是放在processing文件夹中
+BT549,HCC70,MB231依次是123,现在直接使用TNBC
+
+```{r settings}
+home_dir = '/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result'
+
+# setting parameters
+# parameters for data type，现在承接Fig6中脚本，使用最新version的mustache，下面的都是TAD/LOOP混合分析时候可选的
+# data_type = 'Mustache'
+# data_type = 'Mustache_v2'
+# data_type = 'HiCcompare'
+# data_type = 'HiCcompare_v1'
+# data_type = 'HiCcompare_v2'
+# data_type = "SpectralTAD"
+#data_type = "SpectralTAD_v2"
+
+data_type = 'Mustache'
+# preprocessing type
+preprocessing = 'any'
+# preprocesing = 'equal'
+
+
+# Depending on data type set the data_dir ，依据上面如果是其他分析，就使用else if
+# set the data directory
+data_dir = file.path(home_dir, paste0('TNBC_preprocessing_', preprocessing))  #TNBC
+
+# set the results directory
+results_dir = file.path(data_dir,paste0('/Gene_Annotations'))#TNBC
+dir.create(results_dir, recursive = TRUE)    
+
+
+# resolutions parameter, all data types must have four different resolutions (in the case of SpectralTAD, it will have window sizes but will be treated like resolutions)
+###### IMPORTANT! Make sure the resolutions are in order from low resolution to high resolution!!! 
+# for SpectralTAD
+#res1 = "500kb"
+#res2 = "200kb"
+#res3 = "100kb"
+#res4 = "50kb"
+
+# for Mustache & HiCcompare,目前暂时不清楚使用的是什么数据，手上的loop只有10kb分辨率的，暂时就使用res来表征
+#res1 = "100kb"
+#res2 = "40kb"
+#res3 = "20kb"
+#res4 = "10kb"
+res="10000"  #or 10kb，但是与之前脚本相统一，还是使用数字,此处不使用多res数据合并
+```
+
+## Libraries 
+
+```{r libraries}
+# Load in libraries 
+#BiocManager::install("ChIPpeakAnno")
+library(ChIPpeakAnno)
+library(rtracklayer)
+#BiocManager::install("GenomicDistributionsData")
+library(GenomicDistributionsData)
+library(EnsDb.Hsapiens.v75)
+#library(EnsDb.Hsapiens.v86) ##(hg38)  #类似于RNA-seq中01脚本中的基因组注释使用的EnsDb数据库，之前使用的是AnnotationHub中查询关键词使用的，query(AnnotationHub(), patter=c("Homo","EnsDb")),但是使用的是v87，也是hg38的
+#v86实际上是能够直接使用bioconductor导入的R包
+#总之如果是hg38就使用注释数据库中检索，如果是hg19，就是用v75,承接前面使用
+
+library(dplyr)
+library(annotables)
+```
+
+## Files Read in
+
+Read in anchors unique to TNBC, unique to HMEC, and common obtained from `ChIPpeakAnno::findOverlapsOfPeaks` from the specified resolution. These files correspond to each respective side of the corresponding Venn Diagram
+unique以及common的anchor等数据依旧是从00脚本中承接
+
+```{r files}
+# arrange the dataframe by IF so that when we export the reduced version later we can keep the IF column with the highest IF，所以什么是IF
+#res数据,按照前面的res数据，如果是多res的，可以按照下面模式全部列出，以及res数据是数字
+#这里对照00脚本中anchor数据是如何来的以及是如何处理的#下面的数据使用的就是00脚本中收集到的数据
+HMEC_res = read.table(file.path(data_dir,paste0('anchors_HMEC_unique_', res, '.bed')),sep = "\t", skip = 1) 
+TNBC_res = read.table(file.path(data_dir,paste0('anchors_TNBC_unique_', res, '.bed')),sep = "\t", skip = 1) 
+HMEC_Common_res = read.table(file.path(data_dir,paste0('anchors_HMEC_common_', res, '.bed')),sep = "\t", skip = 1) 
+TNBC_Common_res = read.table(file.path(data_dir,paste0('anchors_TNBC_common_', res, '.bed')),sep = "\t", skip = 1) 
+#跳过表头之后每一列都是v开头数字
+
+#res数据不够可以补充
+
+```
+
+## Genomic Ranges 
+
+Build GenomicRanges Object for each HMEC, TNBC, and Common anchor datatable for each resolution and reduce
+从bed文件中创建对象，以便于后续的分析 ，同时使用reduce进行对应的合并overlap的范围化简
+实际上就是将每一个anchor转换为gr对象
+```{r granges}
+## res，没有标注common的就是unique的anchor数据，v1是chr，2-3就是anchor的起止坐标
+GR_HMEC_res = GRanges(seqnames=HMEC_res$V1, 
+                      ranges= IRanges(start=HMEC_res$V2, end=HMEC_res$V3)) %>%  
+  GenomicRanges::reduce()
+GR_TNBC_res = GRanges(seqnames=TNBC_res$V1, 
+                      ranges= IRanges(start=TNBC_res$V2, end=TNBC_res$V3))  %>%  
+  GenomicRanges::reduce()
+GR_HMEC_Common_res = GRanges(seqnames=HMEC_Common_res$V1, 
+                      ranges= IRanges(start=HMEC_Common_res$V2, end=HMEC_Common_res$V3))  %>%  GenomicRanges::reduce()
+GR_TNBC_Common_res = GRanges(seqnames=TNBC_Common_res$V1, 
+                      ranges= IRanges(start=TNBC_Common_res$V2, end=TNBC_Common_res$V3))  %>%  GenomicRanges::reduce()
+
+## 同理还有res1-4
+
+
+
+
+```
+
+## Load in Genomic Annotations
+
+Load in HG19 genomic annotations to reference against anchors 
+加载HG19基因组注释数据，并将其与之前创建的anchor基因组范围对象进行比较,基因注释的话只使用了蛋白编码gene
+
+```{r}
+## create annotation file from EnsDb
+annoData <- toGRanges(EnsDb.Hsapiens.v75, feature="gene")
+# load in human gene annotations 
+library(org.Hs.eg.db)
+OrgDb = "org.Hs.eg.db"; species = "hsa"
+gene_annotations <- grch37[ !(grepl("_", grch37$chr) | grepl("GL", grch37$chr)), c("ensgene", "symbol", "biotype", "description")]
+gene_annotations <- gene_annotations[ !duplicated(gene_annotations) & !is.na(gene_annotations$symbol) & gene_annotations$description != "" & gene_annotations$biotype == "protein_coding", ] 
+# filter out only protein coding，没有重复的注释信息、符号（symbol）不为空、描述（description）不为空且生物类型（biotype）为"protein_coding"，并且没有下划线
+# All genes for background
+all.symbol <- unique(gene_annotations$symbol) 
+# filter annoData to contain only protein coding genes 
+annoData <- annoData[annoData$gene_name %in% all.symbol]
+#summary(factor(gene_annotations$biotype))
+
+
+#！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+#1，此处要不要使用自己的promoter的bed文件，一般是定义为上下游1kb，还是直接使用下列注释函数
+#2，自己的SE等文件如何注释，如何在此处中转换为gr对象然后使用
+```
+
+## annotatePeakInBatch来自ChIPpeakAnno
+Obtain the distance to the nearest TSS, miRNA, and/or exon for a list of peaks
+具体可以?查询
+为注释peak文件获取到最近的TSS, miRNA和/或外显子的距离
+通过调用annotatePeakInBatch函数，并根据所需的注释结果设置参数值，可以将重叠的峰值与注释数据中的基因组特征进行注释，并获取与这些峰值重叠的基因名称和距离。这样可以进一步研究峰值与基因之间的关联关系，以及它们在基因组中的位置和功能
+
+下面实际上是对函数annotatePeakInBatch的详细解释
+Annotate the overlapping peaks with the genomic features in the AnnotationData.
+Obtain Gene names and distances for just overlapping genes (set output argument to "overlapping") and then for overlapping + nearby (set output argument to "both").
+Set maxgap = -1 (default) which indicates that for genes to be "overlapping" anchors they cannot be disjoint. 
+Set select = "all" which returns multiple overlapping peaks, if an anchor overlaps with multiple genes it returns all genes. 
+
+随便举一个例子（不一定准确，需要参考官方文档）
+annotatePeakInBatch(peakRanges, AnnotationData, output = c("overlapping", "both"), maxgap = -1, select = "all")
+peakRanges: 一个基因组范围对象，表示峰值的位置信息。
+AnnotationData: 注释数据，包含了基因组特征的信息，例如基因的位置和其他注释信息。
+output: 输出类型的选项，可选值为"c("overlapping", "both")"。如果设置为"overlapping"，则仅输出与峰值重叠的基因名称和距离；如果设置为"both"，则输出与峰值重叠以及附近的基因名称和距离。
+maxgap: 最大间隔的设置，用于确定基因是否被认为与峰值"overlapping"。默认值为-1，表示基因必须是连续的，不能有间隔。
+select: 选择类型的选项，可选值为"all"。如果设置为"all"，则对于与多个基因重叠的峰值，返回所有重叠的基因；如果设置为"first"，则只返回与第一个重叠基因相关的信息。
+
+
+
+
+### First Resolution 实际上我只有loop的10kb分辨率数据，
+所以最后的res1-4以及合并步骤就暂时不执行了————思考一下是否有必要使用多个res的数据，究竟是为了什么，是数据深度不足&没有rep合并吗？
+如果后续有数据需求，那么这一步就作为res1，即10kb的part
+
+
+
+下面的注释用的还是gene body的overlap，和dchic中区室gene分析是一致的，
+但是建议是使用TSS来进行overlap分析，要不暂时保留，先选择此处的gene bosy overlap的分析，TSS选择下一个位点
+```{r first_resolution}
+#### HMEC
+## Overlapping Only, HMEC res 
+#调用annotatePeakInBatch函数，将名为GR_HMEC_res的基因组范围对象与注释数据annoData进行注释。设置参数output="overlapping"表示只获取与峰值重叠的基因名称和距离，设置参数select="all"表示对于与多个基因重叠的峰值，返回所有重叠的基因;将HMEC数据集中的重叠峰值与基因组注释数据进行关联，并获取与这些峰值重叠的基因名称和距离
+GR_HMEC_res_overlap.anno <- annotatePeakInBatch(GR_HMEC_res, AnnotationData=annoData, 
+                                     output="overlapping", select= "all")
+GR_HMEC_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_res_overlap.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_HMEC_res_overlap.anno=GR_HMEC_res_overlap.anno[!is.na(GR_HMEC_res_overlap.anno$gene_name)]
+
+### Visualize
+#head(GR_HMEC_res_overlap.anno) GRanges object with 3802 ranges，或者使用length
+
+
+
+## Overlapping + Nearby, HMEC res 
+#同上，设置参数output="both"表示获取与峰值重叠以及附近的基因名称和距离，设置参数select="all"表示对于与多个基因重叠的峰值，返回所有重叠的基因
+GR_HMEC_res_both.anno <- annotatePeakInBatch(GR_HMEC_res, AnnotationData=annoData, 
+                                                output="both", select= "all")
+GR_HMEC_res_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_res_both.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_HMEC_res_both.anno=GR_HMEC_res_both.anno[!is.na(GR_HMEC_res_both.anno$gene_name)]
+### Visualize
+#head(GR_HMEC_res_both.anno)
+#length(GR_HMEC_res_both.anno) 7588
+
+
+
+
+#### TNBC
+### Overlapping Only, TNBC res 
+GR_TNBC_res_overlap.anno <- annotatePeakInBatch(GR_TNBC_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_TNBC_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_TNBC_res_overlap.anno$feature,
+                           names(annoData))]
+## Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_TNBC_res_overlap.anno=GR_TNBC_res_overlap.anno[!is.na(GR_TNBC_res_overlap.anno$gene_name)]
+
+#head(GR_TNBC_res_overlap.anno)
+#length(GR_TNBC_res_overlap.anno)
+
+### Overlapping + Nearby, TNBC res 
+GR_TNBC_res_both.anno <- annotatePeakInBatch(GR_TNBC_res, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_TNBC_res_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_TNBC_res_both.anno$feature,
+                           names(annoData))]
+## Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_TNBC_res_both.anno=GR_TNBC_res_both.anno[!is.na(GR_TNBC_res_both.anno$gene_name)]
+
+### Visualize
+#head(GR_TNBC_res_both.anno)
+#length(GR_TNBC_res_both.anno)
+
+
+
+
+#### HMEC Common
+### Overlapping Only, Common res 
+GR_HMEC_Common_res_overlap.anno <- annotatePeakInBatch(GR_HMEC_Common_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_HMEC_Common_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_Common_res_overlap.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_HMEC_Common_res_overlap.anno=GR_HMEC_Common_res_overlap.anno[!is.na(GR_HMEC_Common_res_overlap.anno$gene_name)]
+
+#head(GR_HMEC_Common_res_overlap.anno)
+#length(GR_HMEC_Common_res_overlap.anno)
+
+### Overlapping + Nearby, HMEC_Common res 
+GR_HMEC_Common_res_both.anno <- annotatePeakInBatch(GR_HMEC_Common_res, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_HMEC_Common_res_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_Common_res_both.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_HMEC_Common_res_both.anno=GR_HMEC_Common_res_both.anno[!is.na(GR_HMEC_Common_res_both.anno$gene_name)]
+
+#head(GR_HMEC_Common_res_both.anno)
+#length(GR_HMEC_Common_res_both.anno)
+
+
+
+
+
+#### TNBC Common
+### Overlapping Only, Common res 
+GR_TNBC_Common_res_overlap.anno <- annotatePeakInBatch(GR_TNBC_Common_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_TNBC_Common_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_TNBC_Common_res_overlap.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_TNBC_Common_res_overlap.anno=GR_TNBC_Common_res_overlap.anno[!is.na(GR_TNBC_Common_res_overlap.anno$gene_name)]
+
+#head(GR_TNBC_Common_res_overlap.anno)
+#length(GR_TNBC_Common_res_overlap.anno)
+
+### Overlapping + Nearby, TNBC_Common res 
+GR_TNBC_Common_res_both.anno <- annotatePeakInBatch(GR_TNBC_Common_res, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_TNBC_Common_res_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_TNBC_Common_res_both.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_TNBC_Common_res_both.anno=GR_TNBC_Common_res_both.anno[!is.na(GR_TNBC_Common_res_both.anno$gene_name)]
+
+#head(GR_TNBC_Common_res_both.anno)
+#length(GR_TNBC_Common_res_both.anno)
+
+
+
+## Now, we want to get the frequencies  (number of genes the anchors overlap/nearby) and the number of anchors and genes and how many anchors they overlap with. Converting these GRanges columns to tables allows for the frequencies to be computed naturally. 
+#计算频率（锚点重叠/附近的基因数量）并获取锚点和基因的计数，以及它们重叠的锚点数量
+
+#### HMEC
+## Extract overlapping only anchors & frequency (# of genes per anchor) 每个锚点对应的基因数量
+HMEC_res_overlap_anchors=as.data.frame(table(GR_HMEC_res_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+HMEC_res_both_anchors=as.data.frame(table(GR_HMEC_res_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 每个基因对应的锚点数量,感觉这个数据应该最贴近我所设想的multi-hub gene的想法以及概念
+#！！！！！！！！！！！！！！！！！！！！！！！！
+HMEC_res_overlap_genes=as.data.frame(table(GR_HMEC_res_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+HMEC_res_both_genes=as.data.frame(table(GR_HMEC_res_both.anno$gene_name))
+
+#### TNBC，同上gene和anchor的都提取
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+TNBC_res_overlap_anchors=as.data.frame(table(GR_TNBC_res_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+TNBC_res_both_anchors=as.data.frame(table(GR_TNBC_res_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+TNBC_res_overlap_genes=as.data.frame(table(GR_TNBC_res_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+TNBC_res_both_genes=as.data.frame(table(GR_TNBC_res_both.anno$gene_name))
+
+#### HMEC_Common同上，上面是特异性的，这里是common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+HMEC_Common_res_overlap_anchors=as.data.frame(table(GR_HMEC_Common_res_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+HMEC_Common_res_both_anchors=as.data.frame(table(GR_HMEC_Common_res_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+HMEC_Common_res_overlap_genes=as.data.frame(table(GR_HMEC_Common_res_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+HMEC_Common_res_both_genes=as.data.frame(table(GR_HMEC_Common_res_both.anno$gene_name))
+
+#### TNBC_Common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+TNBC_Common_res_overlap_anchors=as.data.frame(table(GR_TNBC_Common_res_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+TNBC_Common_res_both_anchors=as.data.frame(table(GR_TNBC_Common_res_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+TNBC_Common_res_overlap_genes=as.data.frame(table(GR_TNBC_Common_res_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+TNBC_Common_res_both_genes=as.data.frame(table(GR_TNBC_Common_res_both.anno$gene_name))
+
+# Rename column names for obtaining Gene list 
+colnames(HMEC_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(HMEC_res_both_genes) <- c('Gene', 'Freq')
+colnames(TNBC_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(TNBC_res_both_genes) <- c('Gene', 'Freq')
+colnames(HMEC_Common_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(HMEC_Common_res_both_genes) <- c('Gene', 'Freq')
+colnames(TNBC_Common_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(TNBC_Common_res_both_genes) <- c('Gene', 'Freq')
+
+## Export gene names and frequencies to file for each different sets of Anchors (HMEC, TNBC, and Common)
+#因为我只有一个数据10kb，所以filepath中的res也就省略了
+write.table(HMEC_res_overlap_genes, file.path(results_dir,paste0("HMEC_",res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(HMEC_res_both_genes, file.path(results_dir,paste0("HMEC_", res, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(TNBC_res_overlap_genes, file.path(results_dir, paste0("TNBC_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(TNBC_res_both_genes, file.path(results_dir, paste0("TNBC_", res, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(HMEC_Common_res_overlap_genes, file.path(results_dir, paste0("HMEC_Common_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(HMEC_Common_res_both_genes, file.path(results_dir, paste0("HMEC_Common_", res, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(TNBC_Common_res_overlap_genes, file.path(results_dir, paste0("TNBC_Common_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(TNBC_Common_res_both_genes, file.path(results_dir,paste0("TNBC_Common_", res, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+```
+
+
+#用于处理EPC
+```{R}
+#####下面的数据是后续EPC注释中获取的P的bed文件
+TNBC_unique_SEPC <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/EPC/sortLOOP/TNBCepc/TNBC_TNBC_SEPC.bed",sep = "\t") 
+TNBC_unique_TEPC <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/EPC/sortLOOP/TNBCepc/TNBC_TNBC_TEPC.bed",sep = "\t")
+HMEC_unique_SEPC <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/EPC/sortLOOP/TNBCepc/TNBC_HMEC_SEPC.bed",sep = "\t")
+HMEC_unique_TEPC <- read.table("/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/EPC/sortLOOP/TNBCepc/TNBC_HMEC_TEPC.bed",sep = "\t")
+GR_TNBC_unique_SEPC = GRanges(seqnames=TNBC_unique_SEPC$V1, 
+                      ranges= IRanges(start=TNBC_unique_SEPC$V2, end=TNBC_unique_SEPC$V3)) %>%  
+  GenomicRanges::reduce()
+GR_TNBC_unique_TEPC = GRanges(seqnames=TNBC_unique_TEPC$V1, 
+                      ranges= IRanges(start=TNBC_unique_TEPC$V2, end=TNBC_unique_TEPC$V3)) %>%  
+  GenomicRanges::reduce()
+GR_HMEC_unique_SEPC = GRanges(seqnames=HMEC_unique_SEPC$V1, 
+                      ranges= IRanges(start=HMEC_unique_SEPC$V2, end=HMEC_unique_SEPC$V3)) %>%  
+  GenomicRanges::reduce()
+GR_HMEC_unique_TEPC = GRanges(seqnames=HMEC_unique_TEPC$V1, 
+                      ranges= IRanges(start=HMEC_unique_TEPC$V2, end=HMEC_unique_TEPC$V3)) %>%  
+  GenomicRanges::reduce()
+
+
+#开始注释获取gene list,TNBC SE
+#FeatureLocForDistance默认就是TSS无需修改，至于PeakLocForDistance选用middle，毕竟使用的是TSS上下游的bed，所以TSS放在中间,但是后面发现有没有指定这个参数都不影响效果
+GR_TNBC_unique_SEPC.anno <- annotatePeakInBatch(GR_TNBC_unique_SEPC, AnnotationData=annoData, 
+output="overlapping", select= "all")
+GR_TNBC_unique_SEPC.anno$gene_name <- 
+  annoData$gene_name[match(GR_TNBC_unique_SEPC.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_TNBC_unique_SEPC.anno=GR_TNBC_unique_SEPC.anno[!is.na(GR_TNBC_unique_SEPC.anno$gene_name)]
+
+#TNBC TE
+GR_TNBC_unique_TEPC.anno <- annotatePeakInBatch(GR_TNBC_unique_TEPC, AnnotationData=annoData, 
+output="overlapping", select= "all")
+GR_TNBC_unique_TEPC.anno$gene_name <- 
+  annoData$gene_name[match(GR_TNBC_unique_TEPC.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_TNBC_unique_TEPC.anno=GR_TNBC_unique_TEPC.anno[!is.na(GR_TNBC_unique_TEPC.anno$gene_name)]
+
+#HMEC SE
+GR_HMEC_unique_SEPC.anno <- annotatePeakInBatch(GR_HMEC_unique_SEPC, AnnotationData=annoData, 
+output="overlapping", select= "all")
+GR_HMEC_unique_SEPC.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_unique_SEPC.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_HMEC_unique_SEPC.anno=GR_HMEC_unique_SEPC.anno[!is.na(GR_HMEC_unique_SEPC.anno$gene_name)]
+
+
+#HMEC TE
+GR_HMEC_unique_TEPC.anno <- annotatePeakInBatch(GR_HMEC_unique_TEPC, AnnotationData=annoData, 
+output="overlapping", select= "all")
+GR_HMEC_unique_TEPC.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_unique_TEPC.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_HMEC_unique_TEPC.anno=GR_HMEC_unique_TEPC.anno[!is.na(GR_HMEC_unique_TEPC.anno$gene_name)]
+
+
+#然后就是获取gene list
+TNBC_unique_SEPC_overlap_genes=as.data.frame(table(GR_TNBC_unique_SEPC.anno$gene_name))
+TNBC_unique_TEPC_overlap_genes=as.data.frame(table(GR_TNBC_unique_TEPC.anno$gene_name))
+HMEC_unique_SEPC_overlap_genes=as.data.frame(table(GR_HMEC_unique_SEPC.anno$gene_name))
+HMEC_unique_TEPC_overlap_genes=as.data.frame(table(GR_HMEC_unique_TEPC.anno$gene_name))
+
+# Rename column names for obtaining Gene list 
+colnames(TNBC_unique_SEPC_overlap_genes) <- c('Gene', 'Freq')
+colnames(TNBC_unique_TEPC_overlap_genes) <- c('Gene', 'Freq')
+colnames(HMEC_unique_SEPC_overlap_genes) <- c('Gene', 'Freq')
+colnames(HMEC_unique_TEPC_overlap_genes) <- c('Gene', 'Freq')
+
+write.table(TNBC_unique_SEPC_overlap_genes, "TNBC_unique_SEPC_overlap_genes.bed", row.names=FALSE, sep="\t", quote = FALSE)
+write.table(TNBC_unique_TEPC_overlap_genes, "TNBC_unique_TEPC_overlap_genes.bed", row.names=FALSE, sep="\t", quote = FALSE)
+write.table(HMEC_unique_SEPC_overlap_genes, "HMEC_unique_SEPC_overlap_genes.bed", row.names=FALSE, sep="\t", quote = FALSE)
+write.table(HMEC_unique_TEPC_overlap_genes, "HMEC_unique_TEPC_overlap_genes.bed", row.names=FALSE, sep="\t", quote = FALSE)
+
+
+```
+
+
+#最后gene数目在TNBC中有点多，还是之后分开来做
+```{r}
+# set the data directory
+data_dir1 = file.path(home_dir, paste0('BT549_preprocessing_', preprocessing))  #BT549
+data_dir2 = file.path(home_dir, paste0('HCC70_preprocessing_', preprocessing))  #HCC70
+data_dir3 = file.path(home_dir, paste0('MB231_preprocessing_', preprocessing))  #MB231
+
+# set the results directory
+results_dir1 = file.path(data_dir1,paste0('/Gene_Annotations')) #BT549
+results_dir2 = file.path(data_dir2,paste0('/Gene_Annotations')) #HCC70
+results_dir3 = file.path(data_dir3,paste0('/Gene_Annotations')) #MB231
+dir.create(results_dir1, recursive = TRUE) 
+dir.create(results_dir2, recursive = TRUE) 
+dir.create(results_dir3, recursive = TRUE) 
+
+
+```
+
+
+#文件读入，但是分开操作
+HMEC vs BT549
+```{r}
+HMEC_res = read.table(file.path(data_dir1,paste0('anchors_HMEC_unique_', res, '.bed')),sep = "\t", skip = 1) 
+BT549_res = read.table(file.path(data_dir1,paste0('anchors_BT549_unique_', res, '.bed')),sep = "\t", skip = 1) 
+HMEC_Common_res = read.table(file.path(data_dir1,paste0('anchors_HMEC_common_', res, '.bed')),sep = "\t", skip = 1) 
+BT549_Common_res = read.table(file.path(data_dir1,paste0('anchors_BT549_common_', res, '.bed')),sep = "\t", skip = 1) 
+
+
+GR_HMEC_res = GRanges(seqnames=HMEC_res$V1, 
+                      ranges= IRanges(start=HMEC_res$V2, end=HMEC_res$V3)) %>%  
+  GenomicRanges::reduce()
+GR_BT549_res = GRanges(seqnames=BT549_res$V1, 
+                      ranges= IRanges(start=BT549_res$V2, end=BT549_res$V3))  %>%  
+  GenomicRanges::reduce()
+GR_HMEC_Common_res = GRanges(seqnames=HMEC_Common_res$V1, 
+                      ranges= IRanges(start=HMEC_Common_res$V2, end=HMEC_Common_res$V3))  %>%  GenomicRanges::reduce()
+GR_BT549_Common_res = GRanges(seqnames=BT549_Common_res$V1, 
+                      ranges= IRanges(start=BT549_Common_res$V2, end=BT549_Common_res$V3))  %>%  GenomicRanges::reduce()
+
+
+#### HMEC
+GR_HMEC_res_overlap.anno <- annotatePeakInBatch(GR_HMEC_res, AnnotationData=annoData, 
+                                     output="overlapping", select= "all")
+GR_HMEC_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_res_overlap.anno$feature,
+                           names(annoData))]
+GR_HMEC_res_overlap.anno=GR_HMEC_res_overlap.anno[!is.na(GR_HMEC_res_overlap.anno$gene_name)]
+
+#### BT549
+GR_BT549_res_overlap.anno <- annotatePeakInBatch(GR_BT549_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_BT549_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_BT549_res_overlap.anno$feature,
+                           names(annoData))]
+GR_BT549_res_overlap.anno=GR_BT549_res_overlap.anno[!is.na(GR_BT549_res_overlap.anno$gene_name)]
+
+#### HMEC Common
+GR_HMEC_Common_res_overlap.anno <- annotatePeakInBatch(GR_HMEC_Common_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_HMEC_Common_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_Common_res_overlap.anno$feature,
+                           names(annoData))]
+GR_HMEC_Common_res_overlap.anno=GR_HMEC_Common_res_overlap.anno[!is.na(GR_HMEC_Common_res_overlap.anno$gene_name)]
+
+#### BT549 Common
+GR_BT549_Common_res_overlap.anno <- annotatePeakInBatch(GR_BT549_Common_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_BT549_Common_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_BT549_Common_res_overlap.anno$feature,
+                           names(annoData))]
+GR_BT549_Common_res_overlap.anno=GR_BT549_Common_res_overlap.anno[!is.na(GR_BT549_Common_res_overlap.anno$gene_name)]
+
+## Now, we want to get the frequencies  (number of genes the anchors overlap/nearby) and the number of anchors and genes and how many anchors they overlap with. Converting these GRanges columns to tables allows for the frequencies to be computed naturally. 
+
+#### HMEC
+## Extract overlapping only anchors & frequency (# of genes per anchor) 每个锚点对应的基因数量
+HMEC_res_overlap_anchors=as.data.frame(table(GR_HMEC_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+HMEC_res_overlap_genes=as.data.frame(table(GR_HMEC_res_overlap.anno$gene_name))
+
+#### BT549，同上gene和anchor的都提取
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+BT549_res_overlap_anchors=as.data.frame(table(GR_BT549_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+BT549_res_overlap_genes=as.data.frame(table(GR_BT549_res_overlap.anno$gene_name))
+
+#### HMEC_Common同上，上面是特异性的，这里是common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+HMEC_Common_res_overlap_anchors=as.data.frame(table(GR_HMEC_Common_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+HMEC_Common_res_overlap_genes=as.data.frame(table(GR_HMEC_Common_res_overlap.anno$gene_name))
+
+#### BT549_Common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+BT549_Common_res_overlap_anchors=as.data.frame(table(GR_BT549_Common_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+BT549_Common_res_overlap_genes=as.data.frame(table(GR_BT549_Common_res_overlap.anno$gene_name))
+
+# Rename column names for obtaining Gene list 
+colnames(HMEC_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(BT549_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(HMEC_Common_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(BT549_Common_res_overlap_genes) <- c('Gene', 'Freq')
+
+## Export gene names and frequencies to file for each different sets of Anchors (HMEC, BT549, and Common)
+write.table(HMEC_res_overlap_genes, file.path(results_dir1,paste0("HMEC_",res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(BT549_res_overlap_genes, file.path(results_dir1, paste0("BT549_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(HMEC_Common_res_overlap_genes, file.path(results_dir1, paste0("HMEC_Common_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(BT549_Common_res_overlap_genes, file.path(results_dir1, paste0("BT549_Common_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+```
+
+
+HMEC vs HCC70
+```{r}
+HMEC_res = read.table(file.path(data_dir2,paste0('anchors_HMEC_unique_', res, '.bed')),sep = "\t", skip = 1) 
+HCC70_res = read.table(file.path(data_dir2,paste0('anchors_HCC70_unique_', res, '.bed')),sep = "\t", skip = 1) 
+HMEC_Common_res = read.table(file.path(data_dir2,paste0('anchors_HMEC_common_', res, '.bed')),sep = "\t", skip = 1) 
+HCC70_Common_res = read.table(file.path(data_dir2,paste0('anchors_HCC70_common_', res, '.bed')),sep = "\t", skip = 1) 
+
+
+GR_HMEC_res = GRanges(seqnames=HMEC_res$V1, 
+                      ranges= IRanges(start=HMEC_res$V2, end=HMEC_res$V3)) %>%  
+  GenomicRanges::reduce()
+GR_HCC70_res = GRanges(seqnames=HCC70_res$V1, 
+                      ranges= IRanges(start=HCC70_res$V2, end=HCC70_res$V3))  %>%  
+  GenomicRanges::reduce()
+GR_HMEC_Common_res = GRanges(seqnames=HMEC_Common_res$V1, 
+                      ranges= IRanges(start=HMEC_Common_res$V2, end=HMEC_Common_res$V3))  %>%  GenomicRanges::reduce()
+GR_HCC70_Common_res = GRanges(seqnames=HCC70_Common_res$V1, 
+                      ranges= IRanges(start=HCC70_Common_res$V2, end=HCC70_Common_res$V3))  %>%  GenomicRanges::reduce()
+
+
+#### HMEC
+GR_HMEC_res_overlap.anno <- annotatePeakInBatch(GR_HMEC_res, AnnotationData=annoData, 
+                                     output="overlapping", select= "all")
+GR_HMEC_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_res_overlap.anno$feature,
+                           names(annoData))]
+GR_HMEC_res_overlap.anno=GR_HMEC_res_overlap.anno[!is.na(GR_HMEC_res_overlap.anno$gene_name)]
+
+#### HCC70
+GR_HCC70_res_overlap.anno <- annotatePeakInBatch(GR_HCC70_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_HCC70_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_HCC70_res_overlap.anno$feature,
+                           names(annoData))]
+GR_HCC70_res_overlap.anno=GR_HCC70_res_overlap.anno[!is.na(GR_HCC70_res_overlap.anno$gene_name)]
+
+#### HMEC Common
+GR_HMEC_Common_res_overlap.anno <- annotatePeakInBatch(GR_HMEC_Common_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_HMEC_Common_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_Common_res_overlap.anno$feature,
+                           names(annoData))]
+GR_HMEC_Common_res_overlap.anno=GR_HMEC_Common_res_overlap.anno[!is.na(GR_HMEC_Common_res_overlap.anno$gene_name)]
+
+#### HCC70 Common
+GR_HCC70_Common_res_overlap.anno <- annotatePeakInBatch(GR_HCC70_Common_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_HCC70_Common_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_HCC70_Common_res_overlap.anno$feature,
+                           names(annoData))]
+GR_HCC70_Common_res_overlap.anno=GR_HCC70_Common_res_overlap.anno[!is.na(GR_HCC70_Common_res_overlap.anno$gene_name)]
+
+## Now, we want to get the frequencies  (number of genes the anchors overlap/nearby) and the number of anchors and genes and how many anchors they overlap with. Converting these GRanges columns to tables allows for the frequencies to be computed naturally. 
+
+#### HMEC
+## Extract overlapping only anchors & frequency (# of genes per anchor) 每个锚点对应的基因数量
+HMEC_res_overlap_anchors=as.data.frame(table(GR_HMEC_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+HMEC_res_overlap_genes=as.data.frame(table(GR_HMEC_res_overlap.anno$gene_name))
+
+#### HCC70，同上gene和anchor的都提取
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+HCC70_res_overlap_anchors=as.data.frame(table(GR_HCC70_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+HCC70_res_overlap_genes=as.data.frame(table(GR_HCC70_res_overlap.anno$gene_name))
+
+#### HMEC_Common同上，上面是特异性的，这里是common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+HMEC_Common_res_overlap_anchors=as.data.frame(table(GR_HMEC_Common_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+HMEC_Common_res_overlap_genes=as.data.frame(table(GR_HMEC_Common_res_overlap.anno$gene_name))
+
+#### HCC70_Common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+HCC70_Common_res_overlap_anchors=as.data.frame(table(GR_HCC70_Common_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+HCC70_Common_res_overlap_genes=as.data.frame(table(GR_HCC70_Common_res_overlap.anno$gene_name))
+
+# Rename column names for obtaining Gene list 
+colnames(HMEC_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(HCC70_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(HMEC_Common_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(HCC70_Common_res_overlap_genes) <- c('Gene', 'Freq')
+
+## Export gene names and frequencies to file for each different sets of Anchors (HMEC, HCC70, and Common)
+write.table(HMEC_res_overlap_genes, file.path(results_dir2,paste0("HMEC_",res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(HCC70_res_overlap_genes, file.path(results_dir2, paste0("HCC70_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(HMEC_Common_res_overlap_genes, file.path(results_dir2, paste0("HMEC_Common_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(HCC70_Common_res_overlap_genes, file.path(results_dir2, paste0("HCC70_Common_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+```
+
+
+HMEC vs MB231
+```{r}
+HMEC_res = read.table(file.path(data_dir3,paste0('anchors_HMEC_unique_', res, '.bed')),sep = "\t", skip = 1) 
+MB231_res = read.table(file.path(data_dir3,paste0('anchors_MB231_unique_', res, '.bed')),sep = "\t", skip = 1) 
+HMEC_Common_res = read.table(file.path(data_dir3,paste0('anchors_HMEC_common_', res, '.bed')),sep = "\t", skip = 1) 
+MB231_Common_res = read.table(file.path(data_dir3,paste0('anchors_MB231_common_', res, '.bed')),sep = "\t", skip = 1)
+
+
+GR_HMEC_res = GRanges(seqnames=HMEC_res$V1, 
+                      ranges= IRanges(start=HMEC_res$V2, end=HMEC_res$V3)) %>%  
+  GenomicRanges::reduce()
+GR_MB231_res = GRanges(seqnames=MB231_res$V1, 
+                      ranges= IRanges(start=MB231_res$V2, end=MB231_res$V3))  %>%  
+  GenomicRanges::reduce()
+GR_HMEC_Common_res = GRanges(seqnames=HMEC_Common_res$V1, 
+                      ranges= IRanges(start=HMEC_Common_res$V2, end=HMEC_Common_res$V3))  %>%  GenomicRanges::reduce()
+GR_MB231_Common_res = GRanges(seqnames=MB231_Common_res$V1, 
+                      ranges= IRanges(start=MB231_Common_res$V2, end=MB231_Common_res$V3))  %>%  GenomicRanges::reduce()
+
+
+#### HMEC
+GR_HMEC_res_overlap.anno <- annotatePeakInBatch(GR_HMEC_res, AnnotationData=annoData, 
+                                     output="overlapping", select= "all")
+GR_HMEC_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_res_overlap.anno$feature,
+                           names(annoData))]
+GR_HMEC_res_overlap.anno=GR_HMEC_res_overlap.anno[!is.na(GR_HMEC_res_overlap.anno$gene_name)]
+
+#### MB231
+GR_MB231_res_overlap.anno <- annotatePeakInBatch(GR_MB231_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_MB231_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_MB231_res_overlap.anno$feature,
+                           names(annoData))]
+GR_MB231_res_overlap.anno=GR_MB231_res_overlap.anno[!is.na(GR_MB231_res_overlap.anno$gene_name)]
+
+#### HMEC Common
+GR_HMEC_Common_res_overlap.anno <- annotatePeakInBatch(GR_HMEC_Common_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_HMEC_Common_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_HMEC_Common_res_overlap.anno$feature,
+                           names(annoData))]
+GR_HMEC_Common_res_overlap.anno=GR_HMEC_Common_res_overlap.anno[!is.na(GR_HMEC_Common_res_overlap.anno$gene_name)]
+
+#### MB231 Common
+GR_MB231_Common_res_overlap.anno <- annotatePeakInBatch(GR_MB231_Common_res, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_MB231_Common_res_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_MB231_Common_res_overlap.anno$feature,
+                           names(annoData))]
+GR_MB231_Common_res_overlap.anno=GR_MB231_Common_res_overlap.anno[!is.na(GR_MB231_Common_res_overlap.anno$gene_name)]
+
+## Now, we want to get the frequencies  (number of genes the anchors overlap/nearby) and the number of anchors and genes and how many anchors they overlap with. Converting these GRanges columns to tables allows for the frequencies to be computed naturally. 
+
+#### HMEC
+## Extract overlapping only anchors & frequency (# of genes per anchor) 每个锚点对应的基因数量
+HMEC_res_overlap_anchors=as.data.frame(table(GR_HMEC_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+HMEC_res_overlap_genes=as.data.frame(table(GR_HMEC_res_overlap.anno$gene_name))
+
+#### MB231，同上gene和anchor的都提取
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+MB231_res_overlap_anchors=as.data.frame(table(GR_MB231_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+MB231_res_overlap_genes=as.data.frame(table(GR_MB231_res_overlap.anno$gene_name))
+
+#### HMEC_Common同上，上面是特异性的，这里是common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+HMEC_Common_res_overlap_anchors=as.data.frame(table(GR_HMEC_Common_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+HMEC_Common_res_overlap_genes=as.data.frame(table(GR_HMEC_Common_res_overlap.anno$gene_name))
+
+#### MB231_Common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+MB231_Common_res_overlap_anchors=as.data.frame(table(GR_MB231_Common_res_overlap.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+MB231_Common_res_overlap_genes=as.data.frame(table(GR_MB231_Common_res_overlap.anno$gene_name))
+
+# Rename column names for obtaining Gene list 
+colnames(HMEC_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(MB231_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(HMEC_Common_res_overlap_genes) <- c('Gene', 'Freq')
+colnames(MB231_Common_res_overlap_genes) <- c('Gene', 'Freq')
+
+## Export gene names and frequencies to file for each different sets of Anchors (HMEC, MB231, and Common)
+write.table(HMEC_res_overlap_genes, file.path(results_dir3,paste0("HMEC_",res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(MB231_res_overlap_genes, file.path(results_dir3, paste0("MB231_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(HMEC_Common_res_overlap_genes, file.path(results_dir3, paste0("HMEC_Common_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(MB231_Common_res_overlap_genes, file.path(results_dir3, paste0("MB231_Common_", res, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+
+```
+
+######下面这里是使用TSS位点作为gene注释的数据库，作为上面分析的备选方案
+```{r}
+
+
+
+```
+
+#从这下面开始，都是多res数据的使用以及合并，我只需要10kb的res即可，就暂时不做了
+### Second Resolution 但是我只有10kb的loop数据，这一步暂时不做
+
+```{r second_resolution}
+#### PR
+## Overlapping Only, PR res2 
+GR_PR_res2_overlap.anno <- annotatePeakInBatch(GR_PR_res2, AnnotationData=annoData, 
+                                     output="overlapping", select= "all")
+GR_PR_res2_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_res2_overlap.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_PR_res2_overlap.anno=GR_PR_res2_overlap.anno[!is.na(GR_PR_res2_overlap.anno$gene_name)]
+
+### Visualize
+#head(GR_PR_res2_overlap.anno)
+
+## Overlapping + Nearby, PR res2 
+GR_PR_res2_both.anno <- annotatePeakInBatch(GR_PR_res2, AnnotationData=annoData, 
+                                                output="both", select= "all")
+GR_PR_res2_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_res2_both.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_PR_res2_both.anno=GR_PR_res2_both.anno[!is.na(GR_PR_res2_both.anno$gene_name)]
+### Visualize
+#head(GR_PR_res2_both.anno)
+#length(GR_PR_res2_both.anno)
+
+#### CR
+### Overlapping Only, CR res2 
+GR_CR_res2_overlap.anno <- annotatePeakInBatch(GR_CR_res2, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_CR_res2_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_res2_overlap.anno$feature,
+                           names(annoData))]
+## Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_CR_res2_overlap.anno=GR_CR_res2_overlap.anno[!is.na(GR_CR_res2_overlap.anno$gene_name)]
+
+head(GR_CR_res2_overlap.anno)
+length(GR_CR_res2_overlap.anno)
+
+### Overlapping + Nearby, CR res2 
+GR_CR_res2_both.anno <- annotatePeakInBatch(GR_CR_res2, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_CR_res2_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_res2_both.anno$feature,
+                           names(annoData))]
+## Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_CR_res2_both.anno=GR_CR_res2_both.anno[!is.na(GR_CR_res2_both.anno$gene_name)]
+
+### Visualize
+#head(GR_CR_res2_both.anno)
+#length(GR_CR_res2_both.anno)
+
+#### PR Common
+### Overlapping Only, Common res2 
+GR_PR_Common_res2_overlap.anno <- annotatePeakInBatch(GR_PR_Common_res2, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_PR_Common_res2_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_Common_res2_overlap.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_PR_Common_res2_overlap.anno=GR_PR_Common_res2_overlap.anno[!is.na(GR_PR_Common_res2_overlap.anno$gene_name)]
+
+#head(GR_PR_Common_res2_overlap.anno)
+#length(GR_PR_Common_res2_overlap.anno)
+
+### Overlapping + Nearby, PR_Common res2 
+GR_PR_Common_res2_both.anno <- annotatePeakInBatch(GR_PR_Common_res2, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_PR_Common_res2_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_Common_res2_both.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_PR_Common_res2_both.anno=GR_PR_Common_res2_both.anno[!is.na(GR_PR_Common_res2_both.anno$gene_name)]
+
+#head(GR_PR_Common_res2_both.anno)
+#length(GR_PR_Common_res2_both.anno)
+
+#### CR Common
+### Overlapping Only, Common res2 
+GR_CR_Common_res2_overlap.anno <- annotatePeakInBatch(GR_CR_Common_res2, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_CR_Common_res2_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_Common_res2_overlap.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_CR_Common_res2_overlap.anno=GR_CR_Common_res2_overlap.anno[!is.na(GR_CR_Common_res2_overlap.anno$gene_name)]
+
+#head(GR_CR_Common_res2_overlap.anno)
+#length(GR_CR_Common_res2_overlap.anno)
+
+### Overlapping + Nearby, CR_Common res2 
+GR_CR_Common_res2_both.anno <- annotatePeakInBatch(GR_CR_Common_res2, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_CR_Common_res2_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_Common_res2_both.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_CR_Common_res2_both.anno=GR_CR_Common_res2_both.anno[!is.na(GR_CR_Common_res2_both.anno$gene_name)]
+
+#head(GR_CR_Common_res2_both.anno)
+#length(GR_CR_Common_res2_both.anno)
+
+## Now, we want to get the frequencies  (number of genes the anchors overlap/nearby) and the number of anchors and genes and how many anchors they overlap with. Converting these GRanges columns to tables allows for the frequencies to be computed naturally. 
+
+#### PR 
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+PR_res2_overlap_anchors=as.data.frame(table(GR_PR_res2_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+PR_res2_both_anchors=as.data.frame(table(GR_PR_res2_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+PR_res2_overlap_genes=as.data.frame(table(GR_PR_res2_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+PR_res2_both_genes=as.data.frame(table(GR_PR_res2_both.anno$gene_name))
+
+#### CR
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+CR_res2_overlap_anchors=as.data.frame(table(GR_CR_res2_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+CR_res2_both_anchors=as.data.frame(table(GR_CR_res2_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+CR_res2_overlap_genes=as.data.frame(table(GR_CR_res2_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+CR_res2_both_genes=as.data.frame(table(GR_CR_res2_both.anno$gene_name))
+
+#### PR_Common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+PR_Common_res2_overlap_anchors=as.data.frame(table(GR_PR_Common_res2_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+PR_Common_res2_both_anchors=as.data.frame(table(GR_PR_Common_res2_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+PR_Common_res2_overlap_genes=as.data.frame(table(GR_PR_Common_res2_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+PR_Common_res2_both_genes=as.data.frame(table(GR_PR_Common_res2_both.anno$gene_name))
+
+#### CR_Common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+CR_Common_res2_overlap_anchors=as.data.frame(table(GR_CR_Common_res2_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+CR_Common_res2_both_anchors=as.data.frame(table(GR_CR_Common_res2_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+CR_Common_res2_overlap_genes=as.data.frame(table(GR_CR_Common_res2_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+CR_Common_res2_both_genes=as.data.frame(table(GR_CR_Common_res2_both.anno$gene_name))
+
+# Rename column names for obtaining Gene list 
+colnames(PR_res2_overlap_genes) <- c('Gene', 'Freq')
+colnames(PR_res2_both_genes) <- c('Gene', 'Freq')
+colnames(CR_res2_overlap_genes) <- c('Gene', 'Freq')
+colnames(CR_res2_both_genes) <- c('Gene', 'Freq')
+colnames(PR_Common_res2_overlap_genes) <- c('Gene', 'Freq')
+colnames(PR_Common_res2_both_genes) <- c('Gene', 'Freq')
+colnames(CR_Common_res2_overlap_genes) <- c('Gene', 'Freq')
+colnames(CR_Common_res2_both_genes) <- c('Gene', 'Freq')
+
+## Export gene names and frequencies to file for each different sets of Anchors (PR, CR, and Common)
+write.table(PR_res2_overlap_genes, file.path(results_dir,res2,paste0("PR_",res2, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(PR_res2_both_genes, file.path(results_dir,res2,paste0("PR_", res2, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_res2_overlap_genes, file.path(results_dir,res2, paste0("CR_", res2, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_res2_both_genes, file.path(results_dir,res2, paste0("CR_", res2, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(PR_Common_res2_overlap_genes, file.path(results_dir,res2, paste0("PR_Common_", res2, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(PR_Common_res2_both_genes, file.path(results_dir,res2, paste0("PR_Common_", res2, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_Common_res2_overlap_genes, file.path(results_dir,res2, paste0("CR_Common_", res2, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_Common_res2_both_genes, file.path(results_dir,res2,paste0("CR_Common_", res2, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+```
+
+### Third Resolution  但是我只有10kb的loop数据，这一步暂时不做
+
+```{r third_resolution}
+#### PR
+## Overlapping Only, PR res3 
+GR_PR_res3_overlap.anno <- annotatePeakInBatch(GR_PR_res3, AnnotationData=annoData, 
+                                     output="overlapping", select= "all")
+GR_PR_res3_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_res3_overlap.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_PR_res3_overlap.anno=GR_PR_res3_overlap.anno[!is.na(GR_PR_res3_overlap.anno$gene_name)]
+
+### Visualize
+#head(GR_PR_res3_overlap.anno)
+
+## Overlapping + Nearby, PR res3 
+GR_PR_res3_both.anno <- annotatePeakInBatch(GR_PR_res3, AnnotationData=annoData, 
+                                                output="both", select= "all")
+GR_PR_res3_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_res3_both.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_PR_res3_both.anno=GR_PR_res3_both.anno[!is.na(GR_PR_res3_both.anno$gene_name)]
+### Visualize
+#head(GR_PR_res3_both.anno)
+#length(GR_PR_res3_both.anno)
+
+#### CR
+### Overlapping Only, CR res3 
+GR_CR_res3_overlap.anno <- annotatePeakInBatch(GR_CR_res3, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_CR_res3_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_res3_overlap.anno$feature,
+                           names(annoData))]
+## Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_CR_res3_overlap.anno=GR_CR_res3_overlap.anno[!is.na(GR_CR_res3_overlap.anno$gene_name)]
+
+head(GR_CR_res3_overlap.anno)
+length(GR_CR_res3_overlap.anno)
+
+### Overlapping + Nearby, CR res3 
+GR_CR_res3_both.anno <- annotatePeakInBatch(GR_CR_res3, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_CR_res3_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_res3_both.anno$feature,
+                           names(annoData))]
+## Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_CR_res3_both.anno=GR_CR_res3_both.anno[!is.na(GR_CR_res3_both.anno$gene_name)]
+
+### Visualize
+#head(GR_CR_res3_both.anno)
+#length(GR_CR_res3_both.anno)
+
+#### PR Common
+### Overlapping Only, Common res3 
+GR_PR_Common_res3_overlap.anno <- annotatePeakInBatch(GR_PR_Common_res3, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_PR_Common_res3_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_Common_res3_overlap.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_PR_Common_res3_overlap.anno=GR_PR_Common_res3_overlap.anno[!is.na(GR_PR_Common_res3_overlap.anno$gene_name)]
+
+#head(GR_PR_Common_res3_overlap.anno)
+#length(GR_PR_Common_res3_overlap.anno)
+
+### Overlapping + Nearby, PR_Common res3 
+GR_PR_Common_res3_both.anno <- annotatePeakInBatch(GR_PR_Common_res3, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_PR_Common_res3_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_Common_res3_both.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_PR_Common_res3_both.anno=GR_PR_Common_res3_both.anno[!is.na(GR_PR_Common_res3_both.anno$gene_name)]
+
+#head(GR_PR_Common_res3_both.anno)
+#length(GR_PR_Common_res3_both.anno)
+
+#### CR Common
+### Overlapping Only, Common res3 
+GR_CR_Common_res3_overlap.anno <- annotatePeakInBatch(GR_CR_Common_res3, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_CR_Common_res3_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_Common_res3_overlap.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_CR_Common_res3_overlap.anno=GR_CR_Common_res3_overlap.anno[!is.na(GR_CR_Common_res3_overlap.anno$gene_name)]
+
+#head(GR_CR_Common_res3_overlap.anno)
+#length(GR_CR_Common_res3_overlap.anno)
+
+### Overlapping + Nearby, CR_Common res3 
+GR_CR_Common_res3_both.anno <- annotatePeakInBatch(GR_CR_Common_res3, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_CR_Common_res3_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_Common_res3_both.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_CR_Common_res3_both.anno=GR_CR_Common_res3_both.anno[!is.na(GR_CR_Common_res3_both.anno$gene_name)]
+
+#head(GR_CR_Common_res3_both.anno)
+#length(GR_CR_Common_res3_both.anno)
+
+## Now, we want to get the frequencies  (number of genes the anchors overlap/nearby) and the number of anchors and genes and how many anchors they overlap with. Converting these GRanges columns to tables allows for the frequencies to be computed naturally. 
+
+#### PR 
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+PR_res3_overlap_anchors=as.data.frame(table(GR_PR_res3_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+PR_res3_both_anchors=as.data.frame(table(GR_PR_res3_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+PR_res3_overlap_genes=as.data.frame(table(GR_PR_res3_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+PR_res3_both_genes=as.data.frame(table(GR_PR_res3_both.anno$gene_name))
+
+#### CR
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+CR_res3_overlap_anchors=as.data.frame(table(GR_CR_res3_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+CR_res3_both_anchors=as.data.frame(table(GR_CR_res3_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+CR_res3_overlap_genes=as.data.frame(table(GR_CR_res3_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+CR_res3_both_genes=as.data.frame(table(GR_CR_res3_both.anno$gene_name))
+
+#### PR_Common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+PR_Common_res3_overlap_anchors=as.data.frame(table(GR_PR_Common_res3_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+PR_Common_res3_both_anchors=as.data.frame(table(GR_PR_Common_res3_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+PR_Common_res3_overlap_genes=as.data.frame(table(GR_PR_Common_res3_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+PR_Common_res3_both_genes=as.data.frame(table(GR_PR_Common_res3_both.anno$gene_name))
+
+#### CR_Common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+CR_Common_res3_overlap_anchors=as.data.frame(table(GR_CR_Common_res3_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+CR_Common_res3_both_anchors=as.data.frame(table(GR_CR_Common_res3_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+CR_Common_res3_overlap_genes=as.data.frame(table(GR_CR_Common_res3_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+CR_Common_res3_both_genes=as.data.frame(table(GR_CR_Common_res3_both.anno$gene_name))
+
+
+# Rename column names for obtaining Gene list 
+colnames(PR_res3_overlap_genes) <- c('Gene', 'Freq')
+colnames(PR_res3_both_genes) <- c('Gene', 'Freq')
+colnames(CR_res3_overlap_genes) <- c('Gene', 'Freq')
+colnames(CR_res3_both_genes) <- c('Gene', 'Freq')
+colnames(PR_Common_res3_overlap_genes) <- c('Gene', 'Freq')
+colnames(PR_Common_res3_both_genes) <- c('Gene', 'Freq')
+colnames(CR_Common_res3_overlap_genes) <- c('Gene', 'Freq')
+colnames(CR_Common_res3_both_genes) <- c('Gene', 'Freq')
+
+## Export gene names and frequencies to file for each different sets of Anchors (PR, CR, and Common)
+write.table(PR_res3_overlap_genes, file.path(results_dir,res3,paste0("PR_",res3, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(PR_res3_both_genes, file.path(results_dir,res3,paste0("PR_", res3, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_res3_overlap_genes, file.path(results_dir,res3, paste0("CR_", res3, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_res3_both_genes, file.path(results_dir,res3, paste0("CR_", res3, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(PR_Common_res3_overlap_genes, file.path(results_dir,res3, paste0("PR_Common_", res3, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(PR_Common_res3_both_genes, file.path(results_dir,res3, paste0("PR_Common_", res3, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_Common_res3_overlap_genes, file.path(results_dir,res3, paste0("CR_Common_", res3, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_Common_res3_both_genes, file.path(results_dir,res3,paste0("CR_Common_", res3, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+```
+
+### Fourth Resolution 但是我只有10kb的loop数据，这一步暂时不做
+
+```{r fourth_resolution}
+#### PR
+## Overlapping Only, PR res4 
+GR_PR_res4_overlap.anno <- annotatePeakInBatch(GR_PR_res4, AnnotationData=annoData, 
+                                     output="overlapping", select= "all")
+GR_PR_res4_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_res4_overlap.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_PR_res4_overlap.anno=GR_PR_res4_overlap.anno[!is.na(GR_PR_res4_overlap.anno$gene_name)]
+
+### Visualize
+#head(GR_PR_res4_overlap.anno)
+
+## Overlapping + Nearby, PR res4 
+GR_PR_res4_both.anno <- annotatePeakInBatch(GR_PR_res4, AnnotationData=annoData, 
+                                                output="both", select= "all")
+GR_PR_res4_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_res4_both.anno$feature,
+                           names(annoData))]
+### Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_PR_res4_both.anno=GR_PR_res4_both.anno[!is.na(GR_PR_res4_both.anno$gene_name)]
+### Visualize
+#head(GR_PR_res4_both.anno)
+#length(GR_PR_res4_both.anno)
+
+#### CR
+### Overlapping Only, CR res4 
+GR_CR_res4_overlap.anno <- annotatePeakInBatch(GR_CR_res4, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_CR_res4_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_res4_overlap.anno$feature,
+                           names(annoData))]
+## Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_CR_res4_overlap.anno=GR_CR_res4_overlap.anno[!is.na(GR_CR_res4_overlap.anno$gene_name)]
+
+head(GR_CR_res4_overlap.anno)
+length(GR_CR_res4_overlap.anno)
+
+### Overlapping + Nearby, CR res4 
+GR_CR_res4_both.anno <- annotatePeakInBatch(GR_CR_res4, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_CR_res4_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_res4_both.anno$feature,
+                           names(annoData))]
+## Filter out gene Names that are NA, anchors that did not overlap with any genes! **
+GR_CR_res4_both.anno=GR_CR_res4_both.anno[!is.na(GR_CR_res4_both.anno$gene_name)]
+
+### Visualize
+#head(GR_CR_res4_both.anno)
+#length(GR_CR_res4_both.anno)
+
+#### PR Common
+### Overlapping Only, Common res4 
+GR_PR_Common_res4_overlap.anno <- annotatePeakInBatch(GR_PR_Common_res4, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_PR_Common_res4_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_Common_res4_overlap.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_PR_Common_res4_overlap.anno=GR_PR_Common_res4_overlap.anno[!is.na(GR_PR_Common_res4_overlap.anno$gene_name)]
+
+#head(GR_PR_Common_res4_overlap.anno)
+#length(GR_PR_Common_res4_overlap.anno)
+
+### Overlapping + Nearby, PR_Common res4 
+GR_PR_Common_res4_both.anno <- annotatePeakInBatch(GR_PR_Common_res4, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_PR_Common_res4_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_PR_Common_res4_both.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_PR_Common_res4_both.anno=GR_PR_Common_res4_both.anno[!is.na(GR_PR_Common_res4_both.anno$gene_name)]
+
+#head(GR_PR_Common_res4_both.anno)
+#length(GR_PR_Common_res4_both.anno)
+
+#### CR Common
+### Overlapping Only, Common res4 
+GR_CR_Common_res4_overlap.anno <- annotatePeakInBatch(GR_CR_Common_res4, AnnotationData=annoData, 
+                                                output="overlapping", select= "all")
+GR_CR_Common_res4_overlap.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_Common_res4_overlap.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_CR_Common_res4_overlap.anno=GR_CR_Common_res4_overlap.anno[!is.na(GR_CR_Common_res4_overlap.anno$gene_name)]
+
+#head(GR_CR_Common_res4_overlap.anno)
+#length(GR_CR_Common_res4_overlap.anno)
+
+### Overlapping + Nearby, CR_Common res4 
+GR_CR_Common_res4_both.anno <- annotatePeakInBatch(GR_CR_Common_res4, AnnotationData=annoData, 
+                                             output="both", select= "all")
+GR_CR_Common_res4_both.anno$gene_name <- 
+  annoData$gene_name[match(GR_CR_Common_res4_both.anno$feature,
+                           names(annoData))]
+
+## Filter out gene Names that are NA **
+GR_CR_Common_res4_both.anno=GR_CR_Common_res4_both.anno[!is.na(GR_CR_Common_res4_both.anno$gene_name)]
+
+#head(GR_CR_Common_res4_both.anno)
+#length(GR_CR_Common_res4_both.anno)
+
+## Now, we want to get the frequencies  (number of genes the anchors overlap/nearby) and the number of anchors and genes and how many anchors they overlap with. Converting these GRanges columns to tables allows for the frequencies to be computed naturally. 
+
+#### PR 
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+PR_res4_overlap_anchors=as.data.frame(table(GR_PR_res4_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+PR_res4_both_anchors=as.data.frame(table(GR_PR_res4_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+PR_res4_overlap_genes=as.data.frame(table(GR_PR_res4_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+PR_res4_both_genes=as.data.frame(table(GR_PR_res4_both.anno$gene_name))
+
+#### CR
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+CR_res4_overlap_anchors=as.data.frame(table(GR_CR_res4_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+CR_res4_both_anchors=as.data.frame(table(GR_CR_res4_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+CR_res4_overlap_genes=as.data.frame(table(GR_CR_res4_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+CR_res4_both_genes=as.data.frame(table(GR_CR_res4_both.anno$gene_name))
+
+#### PR_Common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+PR_Common_res4_overlap_anchors=as.data.frame(table(GR_PR_Common_res4_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+PR_Common_res4_both_anchors=as.data.frame(table(GR_PR_Common_res4_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+PR_Common_res4_overlap_genes=as.data.frame(table(GR_PR_Common_res4_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+PR_Common_res4_both_genes=as.data.frame(table(GR_PR_Common_res4_both.anno$gene_name))
+
+#### CR_Common
+## Extract overlapping only anchors & frequency (# of genes per anchor) 
+CR_Common_res4_overlap_anchors=as.data.frame(table(GR_CR_Common_res4_overlap.anno$peak))
+## Extract overlapping & nearby anchors only & frequency (# of genes per anchor) 
+CR_Common_res4_both_anchors=as.data.frame(table(GR_CR_Common_res4_both.anno$peak))
+## Extract overlapping only genes & frequency (# of anchors per gene) 
+CR_Common_res4_overlap_genes=as.data.frame(table(GR_CR_Common_res4_overlap.anno$gene_name))
+## Extract overlapping & nearby genes & frequency (# of anchors per gene) 
+CR_Common_res4_both_genes=as.data.frame(table(GR_CR_Common_res4_both.anno$gene_name))
+
+# Rename column names for obtaining Gene list 
+colnames(PR_res4_overlap_genes) <- c('Gene', 'Freq')
+colnames(PR_res4_both_genes) <- c('Gene', 'Freq')
+colnames(CR_res4_overlap_genes) <- c('Gene', 'Freq')
+colnames(CR_res4_both_genes) <- c('Gene', 'Freq')
+colnames(PR_Common_res4_overlap_genes) <- c('Gene', 'Freq')
+colnames(PR_Common_res4_both_genes) <- c('Gene', 'Freq')
+colnames(CR_Common_res4_overlap_genes) <- c('Gene', 'Freq')
+colnames(CR_Common_res4_both_genes) <- c('Gene', 'Freq')
+
+## Export gene names and frequencies to file for each different sets of Anchors (PR, CR, and Common)
+write.table(PR_res4_overlap_genes, file.path(results_dir,res4,paste0("PR_",res4, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(PR_res4_both_genes, file.path(results_dir,res4,paste0("PR_", res4, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_res4_overlap_genes, file.path(results_dir,res4, paste0("CR_", res4, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_res4_both_genes, file.path(results_dir,res4, paste0("CR_", res4, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(PR_Common_res4_overlap_genes, file.path(results_dir,res4, paste0("PR_Common_", res4, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(PR_Common_res4_both_genes, file.path(results_dir,res4, paste0("PR_Common_", res4, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_Common_res4_overlap_genes, file.path(results_dir,res4, paste0("CR_Common_", res4, "_Overlapping_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+write.table(CR_Common_res4_both_genes, file.path(results_dir,res4,paste0("CR_Common_", res4, "_Overlapping_Nearby_Genes.bed")), row.names=FALSE, sep="\t", quote = FALSE)
+```
+
+
+
+### Combined Resolution Analysis on Overlapping Genes 
+所以为什么要4个res，是因为怕深度不够吗，然后合并？
+注意我所使用的分辨率只有10kb，所以下面对应的步骤都不执行
+
+Get a gene list of ones that are in all resolutions, genes combined, filter out duplicates, then iterate through that gene list and if it is present in the PR_resolution_overlap_anno genes then give a + if not it is not minus for each resolution. 
+
+先是混合c之后unique，一般是为了扩大信号(所以gene数目会比较多，某种程度上就是取并集，所以确实可能是深度不够的原因)
+相对应的，其实我可以使用rep1+rep2来c再unique
+从以下4块代码来看，实际上最后数据输出的，即所谓combined的
+HMEC(unique),BT549(unique)，以及
+HMEC common,BT549 common，
+与上一个模块收集的非combined的单一res(即我手头所拥有的10kb的res)
+HMEC(unique),BT549(unique)，以及
+HMEC common,BT549 common，
+的唯一区别在于：
+下面做的combined就是并集+过滤扩大了多res的gene数据，
+以及转换成了数据框，新增了几列（也仅仅只是res的几列+res总的count列），实际上新增的几列只是确定每个基因在不同分辨率中的存在情况，即存储了多res情况下的gene计数频率信息而已，实际上并没有着增加新的信息
+前者因为我手头上只有10kb的数据，所以基本上是没有影响的
+后者因为我只有一个10kb的数据，所以gene没必要也没法取并集，也就没有必要统计多res的信息了
+唯一要注意的也就是未combined中的数据组成与最后新输出的数据组成之间的对应关系
+只要比对这两边最后输出的数据就可以了
+而且下面使用并集其实是对ovelap用的，并不是对both
+
+
+#### PR 对应HMEC unique
+
+```{r PR}
+## Combine all the genes across all resolutions, get only the unique genes
+#将所有分辨率下的基因组合成一个列表，并去除重复的基因  
+combined_PR_genes = unique(c(PR_res1_overlap_genes$Gene, PR_res2_overlap_genes$Gene, PR_res3_overlap_genes$Gene, PR_res4_overlap_genes$Gene))
+
+# Make it into a dataframe 将这个基因列表转换为数据框的形式，并为每个分辨率添加默认值为 "-" 的列,此处一共是4个res+1个gene列
+combined_PR_genes = as.data.frame(combined_PR_genes)
+# Add defaults for resolutions as '-'
+colnames(combined_PR_genes) <- "Gene"
+combined_PR_genes[res4] = '-'
+combined_PR_genes[res3] = '-'
+combined_PR_genes[res2] = '-'
+combined_PR_genes[res1] = '-'
+# Add defaults for resolution count to be 0 添加一个名为 "resolution_count" 的列，并将其默认值设置为 0，综上一共是6列
+combined_PR_genes['resolution_count'] = 0
+
+# Iterate through all the genes in the combined resolution data frame and change value to '+' if it is contained in the resolution and add one to the resolution count 
+#迭代基因列表中的每个基因，检查它是否存在于每个分辨率的重叠基因中，并根据情况给出 "+" 或 "-" 的标记，并将分辨率计数增加 1，所以只要计数是4，那么就代表这个gene是在4个res下都出现的
+for(gene in 1:nrow(combined_PR_genes)){
+  #print(combined_PR_genes[gene, 1])
+  if(combined_PR_genes[gene,1] %in% PR_res4_overlap_genes$Gene){
+    combined_PR_genes[gene, 2] = '+'
+    combined_PR_genes[gene, 6] = combined_PR_genes[gene, 6] + 1
+  }
+  if (combined_PR_genes[gene,1] %in% PR_res3_overlap_genes$Gene){
+    combined_PR_genes[gene, 3] = '+'
+    combined_PR_genes[gene, 6] = combined_PR_genes[gene, 6] + 1
+  }
+  if (combined_PR_genes[gene,1] %in% PR_res2_overlap_genes$Gene){
+    combined_PR_genes[gene, 4] = '+'
+    combined_PR_genes[gene, 6] = combined_PR_genes[gene, 6] + 1
+  }
+  if (combined_PR_genes[gene,1] %in% PR_res1_overlap_genes$Gene){
+    combined_PR_genes[gene, 5] = '+'
+    combined_PR_genes[gene, 6] = combined_PR_genes[gene, 6] + 1
+  }
+}
+
+#可以得到一个包含了所有分辨率下存在的基因的列表，并确定每个基因在不同分辨率中的存在情况，并将分辨率计数存储在 "resolution_count" 列中。例如，如果一个基因在第四个分辨率中存在，那么在对应的行中，第二列将为 "+"，分辨率计数将增加 1。
+#这样，我们可以通过分析这个合并的基因列表，了解在所有分辨率中哪些基因存在，并统计每个基因在多少个分辨率中存在
+```
+
+#### CR  对应BT549 unique，同上处理注释
+
+```{r CR}
+## Combine all the genes across all resolutions, get only the unique genes  
+combined_CR_genes = unique(c(CR_res1_overlap_genes$Gene, CR_res2_overlap_genes$Gene, CR_res3_overlap_genes$Gene, CR_res4_overlap_genes$Gene))
+
+# Make it into a dataframe 
+combined_CR_genes = as.data.frame(combined_CR_genes)
+# Add defaults for resolutions as '-'
+colnames(combined_CR_genes) <- "Gene"
+combined_CR_genes[res4] = '-'
+combined_CR_genes[res3] = '-'
+combined_CR_genes[res2] = '-'
+combined_CR_genes[res1] = '-'
+# Add defaults for resolution count to be 0 
+combined_CR_genes['resolution_count'] = 0
+
+# Iterate through all the genes in the combined resolution data frame and change value to '+' if it is contained in the resolution and add one to the resolution count 
+for(gene in 1:nrow(combined_CR_genes)){
+  #print(combined_CR_genes[gene, 1])
+  if(combined_CR_genes[gene,1] %in% CR_res4_overlap_genes$Gene){
+    combined_CR_genes[gene, 2] = '+'
+    combined_CR_genes[gene, 6] = combined_CR_genes[gene, 6] + 1
+  }
+  if (combined_CR_genes[gene,1] %in% CR_res3_overlap_genes$Gene){
+    combined_CR_genes[gene, 3] = '+'
+    combined_CR_genes[gene, 6] = combined_CR_genes[gene, 6] + 1
+  }
+  if (combined_CR_genes[gene,1] %in% CR_res2_overlap_genes$Gene){
+    combined_CR_genes[gene, 4] = '+'
+    combined_CR_genes[gene, 6] = combined_CR_genes[gene, 6] + 1
+  }
+  if (combined_CR_genes[gene,1] %in% CR_res1_overlap_genes$Gene){
+    combined_CR_genes[gene, 5] = '+'
+    combined_CR_genes[gene, 6] = combined_CR_genes[gene, 6] + 1
+  }
+}
+```
+
+#### PR Common  对应HMEC common，同上处理注释
+
+```{r PR_Common}
+## Combine all the genes across all resolutions, get only the unique genes  
+combined_PR_Common_genes = unique(c(PR_Common_res1_overlap_genes$Gene, PR_Common_res2_overlap_genes$Gene, PR_Common_res3_overlap_genes$Gene, PR_Common_res4_overlap_genes$Gene))
+
+# Make it into a dataframe 
+combined_PR_Common_genes = as.data.frame(combined_PR_Common_genes)
+# Add defaults for resolutions as '-'
+colnames(combined_PR_Common_genes) <- "Gene"
+combined_PR_Common_genes[res4] = '-'
+combined_PR_Common_genes[res3] = '-'
+combined_PR_Common_genes[res2] = '-'
+combined_PR_Common_genes[res1] = '-'
+# Add defaults for resolution count to be 0 
+combined_PR_Common_genes['resolution_count'] = 0
+
+# Iterate through all the genes in the combined resolution data frame and change value to '+' if it is contained in the resolution and add one to the resolution count 
+for(gene in 1:nrow(combined_PR_Common_genes)){
+  #print(combined_PR_Common_genes[gene, 1])
+  if(combined_PR_Common_genes[gene,1] %in% PR_Common_res4_overlap_genes$Gene){
+    combined_PR_Common_genes[gene, 2] = '+'
+    combined_PR_Common_genes[gene, 6] = combined_PR_Common_genes[gene, 6] + 1
+  }
+  if (combined_PR_Common_genes[gene,1] %in% PR_Common_res3_overlap_genes$Gene){
+    combined_PR_Common_genes[gene, 3] = '+'
+    combined_PR_Common_genes[gene, 6] = combined_PR_Common_genes[gene, 6] + 1
+  }
+  if (combined_PR_Common_genes[gene,1] %in% PR_Common_res2_overlap_genes$Gene){
+    combined_PR_Common_genes[gene, 4] = '+'
+    combined_PR_Common_genes[gene, 6] = combined_PR_Common_genes[gene, 6] + 1
+  }
+  if (combined_PR_Common_genes[gene,1] %in% PR_Common_res1_overlap_genes$Gene){
+    combined_PR_Common_genes[gene, 5] = '+'
+    combined_PR_Common_genes[gene, 6] = combined_PR_Common_genes[gene, 6] + 1
+  }
+}
+```
+
+#### CR Common   对应BT549 common，同上处理注释
+
+```{r CR_Common}
+## Combine all the genes across all resolutions, get only the unique genes  
+combined_CR_Common_genes = unique(c(CR_Common_res1_overlap_genes$Gene, CR_Common_res2_overlap_genes$Gene, CR_Common_res3_overlap_genes$Gene, CR_Common_res4_overlap_genes$Gene))
+
+# Make it into a dataframe 
+combined_CR_Common_genes = as.data.frame(combined_CR_Common_genes)
+# Add defaults for resolutions as '-'
+colnames(combined_CR_Common_genes) <- "Gene"
+combined_CR_Common_genes[res4] = '-'
+combined_CR_Common_genes[res3] = '-'
+combined_CR_Common_genes[res2] = '-'
+combined_CR_Common_genes[res1] = '-'
+# Add defaults for resolution count to be 0 
+combined_CR_Common_genes['resolution_count'] = 0
+
+# Iterate through all the genes in the combined resolution data frame and change value to '+' if it is contained in the resolution and add one to the resolution count 
+for(gene in 1:nrow(combined_CR_Common_genes)){
+  #print(combined_CR_Common_genes[gene, 1])
+  if(combined_CR_Common_genes[gene,1] %in% CR_Common_res4_overlap_genes$Gene){
+    combined_CR_Common_genes[gene, 2] = '+'
+    combined_CR_Common_genes[gene, 6] = combined_CR_Common_genes[gene, 6] + 1
+  }
+  if (combined_CR_Common_genes[gene,1] %in% CR_Common_res3_overlap_genes$Gene){
+    combined_CR_Common_genes[gene, 3] = '+'
+    combined_CR_Common_genes[gene, 6] = combined_CR_Common_genes[gene, 6] + 1
+  }
+  if (combined_CR_Common_genes[gene,1] %in% CR_Common_res2_overlap_genes$Gene){
+    combined_CR_Common_genes[gene, 4] = '+'
+    combined_CR_Common_genes[gene, 6] = combined_CR_Common_genes[gene, 6] + 1
+  }
+  if (combined_CR_Common_genes[gene,1] %in% CR_Common_res1_overlap_genes$Gene){
+    combined_CR_Common_genes[gene, 5] = '+'
+    combined_CR_Common_genes[gene, 6] = combined_CR_Common_genes[gene, 6] + 1
+  }
+}
+```
+
+#### Save combined Genes to files 
+
+```{r export}
+###### Save files as what we have as of now, incomplete but will be used in Enrichment Analysis 
+write.table(combined_PR_genes, file.path(results_dir, paste0(data_type,"_PR_specific_combined_resolution_overlapping_genes.bed")),quote= FALSE, sep= "\t", row.names = FALSE)
+write.table(combined_CR_genes, file.path(results_dir, paste0(  data_type,"_CR_specific_combined_resolution_overlapping_genes.bed")),quote= FALSE, sep= "\t", row.names = FALSE)
+write.table(combined_PR_Common_genes, file.path(results_dir, paste0( data_type,"_PR_Common_combined_resolution_overlapping_genes.bed")),quote= FALSE, sep= "\t", row.names = FALSE)
+write.table(combined_CR_Common_genes, file.path(results_dir, paste0( data_type,"_CR_Common_combined_resolution_overlapping_genes.bed")),quote= FALSE, sep= "\t", row.names = FALSE)
+```
+
+
