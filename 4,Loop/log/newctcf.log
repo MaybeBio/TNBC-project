@@ -1,0 +1,61 @@
+nohup: ignoring input
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/loops_BT549_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/CTCF_BT549_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/loops_HMEC_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/CTCF_HMEC_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/loops_HCC70_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/CTCF_HCC70_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/loops_HMEC_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/CTCF_HMEC_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/loops_MB231_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/CTCF_MB231_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/loops_HMEC_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/CTCF_HMEC_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/loops_BT549_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all_filter_reduce.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/CTCF_hg19_all_filter_reduce_BT549_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/loops_HMEC_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all_filter_reduce.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/CTCF_hg19_all_filter_reduce_HMEC_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/loops_HCC70_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all_filter_reduce.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/CTCF_hg19_all_filter_reduce_HCC70_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/loops_HMEC_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all_filter_reduce.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/CTCF_hg19_all_filter_reduce_HMEC_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/loops_MB231_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all_filter_reduce.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/CTCF_hg19_all_filter_reduce_MB231_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/loops_HMEC_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all_filter_reduce.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/CTCF_hg19_all_filter_reduce_HMEC_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/loops_BT549_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/CTCF_hg19_all_BT549_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/loops_HMEC_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/BT549_preprocessing_any/CTCF_hg19_all_HMEC_all_10kb_CTCF_orientation.pdf
+MoTTY X11 proxy: Authorisation not recognised
+
+[36mIn case you are trying to start a graphical application with "sudo", read this article in order to avoid this issue:
+[35m[4mhttps://blog.mobatek.net/post/how-to-keep-X11-display-after-su-or-sudo/[0m
+
+
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/loops_HCC70_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/CTCF_hg19_all_HCC70_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/loops_HMEC_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/HCC70_preprocessing_any/CTCF_hg19_all_HMEC_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/loops_MB231_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/CTCF_hg19_all_MB231_all_10kb_CTCF_orientation.pdf
+Loop file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/loops_HMEC_all_10000.bedpe
+Motif file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/CTCFbed/CTCF_hg19_all.bed
+Output file is  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/MB231_preprocessing_any/CTCF_hg19_all_HMEC_all_10kb_CTCF_orientation.pdf

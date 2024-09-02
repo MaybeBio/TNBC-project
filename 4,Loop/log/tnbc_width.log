@@ -1,0 +1,13 @@
+nohup: ignoring input
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_HMEC_unique_10000.bedpe is:  18.535048815198703
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_HMEC_unique_10000.bedpe is:  18.609640474436812
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_TNBC_unique_10000.bedpe is:  18.32046239714419
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_TNBC_unique_10000.bedpe is:  18.3321064989079
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_HMEC_common_10000.bedpe is:  18.173848273611597
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_HMEC_common_10000.bedpe is:  18.145693374677023
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_TNBC_common_10000.bedpe is:  18.166463562745708
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_TNBC_common_10000.bedpe is:  18.145693374677023
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_HMEC_all_10000.bedpe is:  18.30803988078431
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_HMEC_all_10000.bedpe is:  18.3321064989079
+ Mean Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_TNBC_all_10000.bedpe is:  18.23098147692205
+ Median Log2(width) for  /mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result/TNBC_preprocessing_any/loops_TNBC_all_10000.bedpe is:  18.241908689936324
