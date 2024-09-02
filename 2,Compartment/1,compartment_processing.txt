@@ -16,7 +16,7 @@ Compartmentalization score分析，也是 (AA+BB) / (AB+BA)比例分析，为PDX
 所有输出结果见100kb_genova、500kb_genova、compartment upstream（同样是以上模块的分析结果，主要是一些次要结果图示）文件夹
 
 2,AB区室转换模块分析:此处为区室分析的重点，主要使用100kb分辨率数据
-主要使用dchic（https://github.com/ay-lab/dcHiC）分析转换区室情况，另外使用R脚本分析下游数据
+主要使用dchic（https://github.com/ay-lab/dcHiC）分析转换区室情况，另外使用R脚本分析下游数据，运行脚本见dchic.log
 （1）dchic主要脚本见run_dchic.sh：
 主要修改dchicf.r的路径（修改成dchic软件安装之后最外层的dchicf.r脚本路径），以及输入文件input.HMEC_TNBC.txt（使用hicpro原生输出数据，本项目使用raw中的matrix+bed），rep分类要分类好；
 另外注意input的txt中matrix+bed最好移除异常chr数据（这在上游hicpro的处理中就可以进行，只保留1-22+XY）,另外也建议移除chrY，依据官方的指示；
