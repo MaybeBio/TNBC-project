@@ -1,0 +1,22 @@
+Loops HMEC all count,16430
+Loops MB231 all count,8156
+Loops HMEC unique count,10819
+Loops MB231 unique count,2545
+Loops HMEC common count,5611
+Loops MB231 common count,5611
+Loops HMEC all width,60000,330000,434152.77,1960000
+Loops MB231 all width,60000,280000,361433.3,1950000
+Loops HMEC unique width,60000,370000,478354.75,1960000
+Loops MB231 unique width,60000,300000,390184.68,1950000
+Loops HMEC common width,70000,270000,348923.54,1940000
+Loops MB231 common width,70000,260000,348392.44,1940000
+HMEC all vs. MB231 all width difference,1.00e-42
+HMEC unique vs. MB231 unique width difference,1.35e-21
+HMEC unique vs. HMEC common width difference,1.06e-95
+MB231 unique vs. MB231 common width difference,1.84e-09
+Anchors HMEC all count,32860
+Anchors MB231 all count,16312
+Anchors HMEC unique count,12891
+Anchors MB231 unique count,1891
+Anchors HMEC common count,19969
+Anchors MB231 common count,14421
