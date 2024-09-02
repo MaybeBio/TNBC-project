@@ -1,0 +1,320 @@
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+# Set up the environment
+library(knitr)
+library(pander)
+panderOptions("table.split.table", Inf)
+set.seed(1)
+library(dplyr)
+options(stringsAsFactors = FALSE)
+setwd("~/bysj_seu/geo_data/hic/script7")
+```
+
+This script creates stacked bar plots showing the counts of BT549 (BT549 unique & BT549 common) and HMEC (HMEC unique and HMEC common) anchor and loops for each data type/resolution. Takes in the file `log_*` that contains the counts of anchors and loops for each condition and resolution (res) for the specified data type (XX)
+
+# Libraries 
+
+```{r lib}
+library(tidyverse)
+library(ggplot2)
+library("ggsci")
+library(scales)
+scales::show_col(pal_lancet("lanonc")(8))
+mycols = pal_lancet("lanonc")(8)
+library(forcats)
+```
+
+# Settings
+
+```{r settings}
+# 主要是存放00脚本获得的loop，anchor结果目录
+home_dir = '/mnt/disk4/haitao/bysj_seu/geo_data/hic/script7/mustache_result'
+# data type parameter, comment out for whichever one is being used 
+# preprocessing parameter, so far any is the only one，就是00脚本中的设置
+preprocessing = "any"
+# resolution parameter 
+resolution = 10000 #or 10kb，此处就按照数字来展示，因为00脚本中输出保持一致
+
+# set data directory depending on data type, results will be saved in same directory主要是存放00脚本获得的loop，anchor结果目录
+data_dir1 = file.path(home_dir, paste0('BT549_preprocessing_', preprocessing))  #BT549
+data_dir2 = file.path(home_dir, paste0('HCC70_preprocessing_', preprocessing))  #HCC70
+data_dir3 = file.path(home_dir, paste0('MB231_preprocessing_', preprocessing))  #MB231
+
+#下面是TNBC的
+data_dir4 = file.path(home_dir, paste0('TNBC_preprocessing_', preprocessing))  #TNBC
+```
+
+# Read in the log file containing anchor and loop counts & reformat data frame
+从这一步开始数据分析就是分开的
+```{r file}
+# read in the file, since there is an unequal # of columns we have to do fill = TRUE and manually name the columns 如果某行的列数不足时，用 NA 填充缺失的列
+logFile = read.table(file.path(data_dir1, paste0("log_", resolution, ".csv")), 
+                     header = FALSE, sep = ",", fill = TRUE, col.names = paste0("V",seq_len(5))) %>% #为读取的每一列分配列名，这里使用了 paste0 函数和 seq_len(5) 来生成 V1 到 V5 的列名
+  # select only the two columns we need
+  dplyr::select(V1, V2) %>% 
+  # pivot wider to get the values from V1 to the column names and the values from V2 to be each column's value for easy accessibility 将数据从长格式（long format）转换为宽格式（wide format），其中 V1 中的值作为新数据框的列名，V2 中的值作为相应列的数值
+  pivot_wider(names_from = V1,
+              values_from = V2)
+
+# create a new dataframe for loop and anchors where there are three columns, one for the condition (HMEC or BT549), one for whether it is unique or common, and one for the value简单的定义数据框+计数count 
+# create first column 
+conditions = c("HMEC", "HMEC", "BT549", "BT549")
+# create column indicating unique or common
+shared = c("Unique", "Common", "Unique", "Common")
+# create column for that value for loops
+loops_value = c(logFile$`Loops HMEC unique count`, logFile$`Loops HMEC common count`, logFile$`Loops BT549 unique count`, logFile$`Loops BT549 common count`)
+# create column for that value for anchors 
+anchors_value = c(logFile$`Anchors HMEC unique count`, logFile$`Anchors HMEC common count`, logFile$`Anchors BT549 unique count`, logFile$`Anchors BT549 common count`)
+# make dataframe for loops 
+loops_df = data.frame(conditions, shared, loops_value) 
+# make dataframe for anchors 
+anchors_df = data.frame(conditions, shared, anchors_value)
+
+
+```
+
+# Create the bar plots for anchors & loops 
+
+```{r barplots}
+# create loops bar plot 
+loopBP = loops_df %>% 
+  ggplot(aes(fill = forcats::fct_rev(shared), y = loops_value, x = conditions)) +
+  geom_bar(position = "stack", stat="identity", width = 0.35) + 
+  theme_bw() +
+  # get rid of the grid 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        text = element_text(size = 13),
+        plot.title=element_text(hjust=0.5)) +
+  ylab("Count") +
+  xlab("") +
+  ggtitle("Loops") +
+  scale_fill_manual(values = rev(mycols[1:2]), name = "") + # get rid of legend title
+  scale_x_discrete(limits = c("HMEC", "BT549"), 
+                   labels=c("HMEC", "BT549")) # reorder the x axis & change labels 
+# save the loop barplot
+ggsave(filename = file.path(data_dir1, paste0("log_", resolution, "_loops_barplot.pdf")), plot = loopBP, width = 7, height = 6)
+
+# create anchors bar plot 
+anchorBP = anchors_df %>% 
+  ggplot(aes(fill = forcats::fct_rev(shared), y = anchors_value, x = conditions)) +
+  geom_bar(position = "stack", stat="identity", width = 0.35) + 
+  theme_bw() +
+  # get rid of the grid 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+         text = element_text(size = 13),
+        plot.title=element_text(hjust=0.5)) +
+  ylab("Count") +
+  xlab("") +
+  ggtitle("Anchors") +
+  scale_fill_manual(values = rev(mycols[1:2]), name = "") + # get rid of legend title 
+  scale_x_discrete(limits = c("HMEC", "BT549"),
+                   labels=c("HMEC", "BT549")) # reorder the x axis & change labels
+# save the anchors barplot
+ggsave(filename = file.path(data_dir1, paste0("log_", resolution, "_anchors_barplot.pdf")), plot = anchorBP, width = 7, height = 6)
+```
+
+
+######涉及到数据的重叠，下面的分析还是分开
+下面是HCC70的
+
+```{r barplots}
+# read in the file, since there is an unequal # of columns we have to do fill = TRUE and manually name the columns 如果某行的列数不足时，用 NA 填充缺失的列
+logFile = read.table(file.path(data_dir2, paste0("log_", resolution, ".csv")), 
+                     header = FALSE, sep = ",", fill = TRUE, col.names = paste0("V",seq_len(5))) %>% #为读取的每一列分配列名，这里使用了 paste0 函数和 seq_len(5) 来生成 V1 到 V5 的列名
+  # select only the two columns we need
+  dplyr::select(V1, V2) %>% 
+  # pivot wider to get the values from V1 to the column names and the values from V2 to be each column's value for easy accessibility 将数据从长格式（long format）转换为宽格式（wide format），其中 V1 中的值作为新数据框的列名，V2 中的值作为相应列的数值
+  pivot_wider(names_from = V1,
+              values_from = V2)
+
+# create a new dataframe for loop and anchors where there are three columns, one for the condition (HMEC or HCC70), one for whether it is unique or common, and one for the value简单的定义数据框+计数count 
+# create first column 
+conditions = c("HMEC", "HMEC", "HCC70", "HCC70")
+# create column indicating unique or common
+shared = c("Unique", "Common", "Unique", "Common")
+# create column for that value for loops
+loops_value = c(logFile$`Loops HMEC unique count`, logFile$`Loops HMEC common count`, logFile$`Loops HCC70 unique count`, logFile$`Loops HCC70 common count`)
+# create column for that value for anchors 
+anchors_value = c(logFile$`Anchors HMEC unique count`, logFile$`Anchors HMEC common count`, logFile$`Anchors HCC70 unique count`, logFile$`Anchors HCC70 common count`)
+# make dataframe for loops 
+loops_df = data.frame(conditions, shared, loops_value) 
+# make dataframe for anchors 
+anchors_df = data.frame(conditions, shared, anchors_value)
+
+
+
+# create loops bar plot 
+loopBP = loops_df %>% 
+  ggplot(aes(fill = forcats::fct_rev(shared), y = loops_value, x = conditions)) +
+  geom_bar(position = "stack", stat="identity", width = 0.35) + 
+  theme_bw() +
+  # get rid of the grid 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        text = element_text(size = 13),
+        plot.title=element_text(hjust=0.5)) +
+  ylab("Count") +
+  xlab("") +
+  ggtitle("Loops") +
+  scale_fill_manual(values = rev(mycols[1:2]), name = "") + # get rid of legend title
+  scale_x_discrete(limits = c("HMEC", "HCC70"), 
+                   labels=c("HMEC", "HCC70")) # reorder the x axis & change labels 
+# save the loop barplot
+ggsave(filename = file.path(data_dir2, paste0("log_", resolution, "_loops_barplot.pdf")), plot = loopBP, width = 7, height = 6)
+
+# create anchors bar plot 
+anchorBP = anchors_df %>% 
+  ggplot(aes(fill = forcats::fct_rev(shared), y = anchors_value, x = conditions)) +
+  geom_bar(position = "stack", stat="identity", width = 0.35) + 
+  theme_bw() +
+  # get rid of the grid 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+         text = element_text(size = 13),
+        plot.title=element_text(hjust=0.5)) +
+  ylab("Count") +
+  xlab("") +
+  ggtitle("Anchors") +
+  scale_fill_manual(values = rev(mycols[1:2]), name = "") + # get rid of legend title 
+  scale_x_discrete(limits = c("HMEC", "HCC70"),
+                   labels=c("HMEC", "HCC70")) # reorder the x axis & change labels
+# save the anchors barplot
+ggsave(filename = file.path(data_dir2, paste0("log_", resolution, "_anchors_barplot.pdf")), plot = anchorBP, width = 7, height = 6)
+```
+
+
+
+##########下面是MB231的
+
+```{r barplots}
+# read in the file, since there is an unequal # of columns we have to do fill = TRUE and manually name the columns 如果某行的列数不足时，用 NA 填充缺失的列
+logFile = read.table(file.path(data_dir3, paste0("log_", resolution, ".csv")), 
+                     header = FALSE, sep = ",", fill = TRUE, col.names = paste0("V",seq_len(5))) %>% #为读取的每一列分配列名，这里使用了 paste0 函数和 seq_len(5) 来生成 V1 到 V5 的列名
+  # select only the two columns we need
+  dplyr::select(V1, V2) %>% 
+  # pivot wider to get the values from V1 to the column names and the values from V2 to be each column's value for easy accessibility 将数据从长格式（long format）转换为宽格式（wide format），其中 V1 中的值作为新数据框的列名，V2 中的值作为相应列的数值
+  pivot_wider(names_from = V1,
+              values_from = V2)
+
+# create a new dataframe for loop and anchors where there are three columns, one for the condition (HMEC or MB231), one for whether it is unique or common, and one for the value简单的定义数据框+计数count 
+# create first column 
+conditions = c("HMEC", "HMEC", "MB231", "MB231")
+# create column indicating unique or common
+shared = c("Unique", "Common", "Unique", "Common")
+# create column for that value for loops
+loops_value = c(logFile$`Loops HMEC unique count`, logFile$`Loops HMEC common count`, logFile$`Loops MB231 unique count`, logFile$`Loops MB231 common count`)
+# create column for that value for anchors 
+anchors_value = c(logFile$`Anchors HMEC unique count`, logFile$`Anchors HMEC common count`, logFile$`Anchors MB231 unique count`, logFile$`Anchors MB231 common count`)
+# make dataframe for loops 
+loops_df = data.frame(conditions, shared, loops_value) 
+# make dataframe for anchors 
+anchors_df = data.frame(conditions, shared, anchors_value)
+
+
+
+# create loops bar plot 
+loopBP = loops_df %>% 
+  ggplot(aes(fill = forcats::fct_rev(shared), y = loops_value, x = conditions)) +
+  geom_bar(position = "stack", stat="identity", width = 0.35) + 
+  theme_bw() +
+  # get rid of the grid 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        text = element_text(size = 13),
+        plot.title=element_text(hjust=0.5)) +
+  ylab("Count") +
+  xlab("") +
+  ggtitle("Loops") +
+  scale_fill_manual(values = rev(mycols[1:2]), name = "") + # get rid of legend title
+  scale_x_discrete(limits = c("HMEC", "MB231"), 
+                   labels=c("HMEC", "MB231")) # reorder the x axis & change labels 
+# save the loop barplot
+ggsave(filename = file.path(data_dir3, paste0("log_", resolution, "_loops_barplot.pdf")), plot = loopBP, width = 7, height = 6)
+ 
+# create anchors bar plot 
+anchorBP = anchors_df %>% 
+  ggplot(aes(fill = forcats::fct_rev(shared), y = anchors_value, x = conditions)) +
+  geom_bar(position = "stack", stat="identity", width = 0.35) + 
+  theme_bw() +
+  # get rid of the grid 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+         text = element_text(size = 13),
+        plot.title=element_text(hjust=0.5)) +
+  ylab("Count") +
+  xlab("") +
+  ggtitle("Anchors") +
+  scale_fill_manual(values = rev(mycols[1:2]), name = "") + # get rid of legend title 
+  scale_x_discrete(limits = c("HMEC", "MB231"),
+                   labels=c("HMEC", "MB231")) # reorder the x axis & change labels
+# save the anchors barplot
+ggsave(filename = file.path(data_dir3, paste0("log_", resolution, "_anchors_barplot.pdf")), plot = anchorBP, width = 7, height = 6)
+```
+
+#下面的是TNBC的
+```{r barplots}
+# read in the file, since there is an unequal # of columns we have to do fill = TRUE and manually name the columns 如果某行的列数不足时，用 NA 填充缺失的列
+logFile = read.table(file.path(data_dir4, paste0("log_", resolution, ".csv")), 
+                     header = FALSE, sep = ",", fill = TRUE, col.names = paste0("V",seq_len(5))) %>% #为读取的每一列分配列名，这里使用了 paste0 函数和 seq_len(5) 来生成 V1 到 V5 的列名
+  # select only the two columns we need
+  dplyr::select(V1, V2) %>% 
+  # pivot wider to get the values from V1 to the column names and the values from V2 to be each column's value for easy accessibility 将数据从长格式（long format）转换为宽格式（wide format），其中 V1 中的值作为新数据框的列名，V2 中的值作为相应列的数值
+  pivot_wider(names_from = V1,
+              values_from = V2)
+
+# create a new dataframe for loop and anchors where there are three columns, one for the condition (HMEC or TNBC), one for whether it is unique or common, and one for the value简单的定义数据框+计数count 
+# create first column 
+conditions = c("HMEC", "HMEC", "TNBC", "TNBC")
+# create column indicating unique or common
+shared = c("Unique", "Common", "Unique", "Common")
+# create column for that value for loops
+loops_value = c(logFile$`Loops HMEC unique count`, logFile$`Loops HMEC common count`, logFile$`Loops TNBC unique count`, logFile$`Loops TNBC common count`)
+# create column for that value for anchors 
+anchors_value = c(logFile$`Anchors HMEC unique count`, logFile$`Anchors HMEC common count`, logFile$`Anchors TNBC unique count`, logFile$`Anchors TNBC common count`)
+# make dataframe for loops 
+loops_df = data.frame(conditions, shared, loops_value) 
+# make dataframe for anchors 
+anchors_df = data.frame(conditions, shared, anchors_value)
+
+
+
+# create loops bar plot 
+loopBP = loops_df %>% 
+  ggplot(aes(fill = forcats::fct_rev(shared), y = loops_value, x = conditions)) +
+  geom_bar(position = "stack", stat="identity", width = 0.35) + 
+  theme_bw() +
+  # get rid of the grid 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        text = element_text(size = 13),
+        plot.title=element_text(hjust=0.5)) +
+  ylab("Count") +
+  xlab("") +
+  ggtitle("Loops") +
+  scale_fill_manual(values = rev(mycols[1:2]), name = "") + # get rid of legend title
+  scale_x_discrete(limits = c("HMEC", "TNBC"), 
+                   labels=c("HMEC", "TNBC")) # reorder the x axis & change labels 
+# save the loop barplot
+ggsave(filename = file.path(data_dir4, paste0("log_", resolution, "_loops_barplot.pdf")), plot = loopBP, width = 7, height = 6)
+ 
+# create anchors bar plot 
+anchorBP = anchors_df %>% 
+  ggplot(aes(fill = forcats::fct_rev(shared), y = anchors_value, x = conditions)) +
+  geom_bar(position = "stack", stat="identity", width = 0.35) + 
+  theme_bw() +
+  # get rid of the grid 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+         text = element_text(size = 13),
+        plot.title=element_text(hjust=0.5)) +
+  ylab("Count") +
+  xlab("") +
+  ggtitle("Anchors") +
+  scale_fill_manual(values = rev(mycols[1:2]), name = "") + # get rid of legend title 
+  scale_x_discrete(limits = c("HMEC", "TNBC"),
+                   labels=c("HMEC", "TNBC")) # reorder the x axis & change labels
+# save the anchors barplot
+ggsave(filename = file.path(data_dir4, paste0("log_", resolution, "_anchors_barplot.pdf")), plot = anchorBP, width = 7, height = 6)
+```
