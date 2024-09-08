@@ -12,7 +12,7 @@ nohup prefetch --maxsize 50G --option-file SRR.txt >& log文件 &     #--maxsize
 fasterq-dump -e 10 sra文件  #-e是线程，注意reads是单端还是双端,视数据质控需求添加其他参数
 
 4，hic-pro软件安装+数据预处理
-(1)hic-pro软件安装细节见【bishe】流程记录1 word（见Ali cloud）
+(1)hic-pro软件安装细节见【bishe】流程记录1 word，hic使用记录（见Ali cloud）
 (2)数据预处理：
 依据hic-pro（https://github.com/nservant/HiC-Pro）软件安装需求准备下列所需3文件（细节同上见相关word）：
 ①table（染色体size文件），
